@@ -417,7 +417,6 @@ For detailed per-client setup, examples, and troubleshooting, see [docs/client-i
 | **Charts** | [VChart](https://visactor.io/vchart) (@visactor/react-vchart) |
 | **Scheduling** | [node-cron](https://github.com/node-cron/node-cron) |
 | **Containerization** | Docker (Debian slim) + Docker Compose |
-| **Testing** | [Vitest](https://vitest.dev) |
 
 ---
 
@@ -438,8 +437,6 @@ npm run dev
 npm run build          # Build frontend + backend
 npm run build:web      # Build frontend only (Vite)
 npm run build:server   # Build backend only (TypeScript)
-npm test               # Run all tests
-npm run test:watch     # Watch mode
 npm run db:generate    # Generate Drizzle migration files
 ```
 

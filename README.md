@@ -293,7 +293,6 @@ Docker Compose、桌面安装包、反向代理、升级与数据库选项等详
 | **数据可视化** | [VChart](https://visactor.io/vchart) (@visactor/react-vchart)        |
 | **定时任务**   | [node-cron](https://github.com/node-cron/node-cron)                  |
 | **容器化**     | Docker (Debian slim) + Docker Compose                             |
-| **测试**       | [Vitest](https://vitest.dev)                                         |
 
 ---
 
@@ -314,8 +313,6 @@ npm run dev
 npm run build          # 构建前端 + 后端
 npm run build:web      # 仅构建前端（Vite）
 npm run build:server   # 仅构建后端（TypeScript）
-npm test               # 运行全部测试
-npm run test:watch     # 监听模式
 npm run db:generate    # 生成 Drizzle 迁移文件
 ```
 

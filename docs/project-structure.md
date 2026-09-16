@@ -86,6 +86,5 @@ docs/
 
 ## 放置规则
 
-- 测试文件尽量与被测源码同目录，命名使用 `*.test.ts` 或 `*.test.tsx`。
 - 运行时数据放 `data/`，临时排障文件放 `tmp/`，不要散落在仓库根目录。
 - 文档站真正对外可访问的静态资源放 `docs/public/`；仍需继续编辑的素材保留在 `docs/logos/` 或 `docs/screenshots/`。

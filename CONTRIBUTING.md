@@ -87,11 +87,9 @@ npm run docs:build       # Build documentation / 构建文档
 npm run docs:preview     # Preview built docs / 预览构建的文档
 ```
 
-### Testing / 测试
+### Validation / 验证
 
 ```bash
-npm test                 # Run all tests / 运行所有测试
-npm run test:watch       # Run tests in watch mode / 监听模式运行测试
 npm run smoke:db         # Database smoke test (SQLite) / 数据库冒烟测试（SQLite）
 npm run smoke:db:mysql   # MySQL smoke test / MySQL 冒烟测试
 npm run smoke:db:postgres # PostgreSQL smoke test / PostgreSQL 冒烟测试
@@ -129,23 +127,18 @@ metapi/
    - One feature or fix per PR / 每个 PR 一个功能或修复
    - Split large changes into multiple PRs / 将大型更改拆分为多个 PR
 
-2. **Write tests** / **编写测试**
-   - Add tests for new features / 为新功能添加测试
-   - Update tests for behavior changes / 为行为变更更新测试
-   - Ensure all tests pass: `npm test` / 确保所有测试通过：`npm test`
-
-3. **Update documentation** / **更新文档**
+2. **Update documentation** / **更新文档**
    - Update README if adding user-facing features / 如果添加面向用户的功能，请更新 README
    - Update docs/ for configuration or API changes / 配置或 API 更改请更新 docs/
    - Add JSDoc comments for new functions / 为新函数添加 JSDoc 注释
 
-4. **Run checks** / **运行检查**
+3. **Run checks** / **运行检查**
    - Documentation changes: `npm run docs:build` / 文档更改：`npm run docs:build`
-   - Code changes: `npm test && npm run build` / 代码更改：`npm test && npm run build`
+   - Code changes: `npm run build` / 代码更改：`npm run build`
    - Database changes: `npm run smoke:db` / 数据库更改：`npm run smoke:db`
    - Architecture / repo drift changes: `npm run repo:drift-check` / 架构与仓库漂移检查：`npm run repo:drift-check`
 
-5. **Follow code style** / **遵循代码风格**
+4. **Follow code style** / **遵循代码风格**
    - Use TypeScript for type safety / 使用 TypeScript 确保类型安全
    - Follow existing code patterns / 遵循现有代码模式
    - Follow repo-level engineering rules in `AGENTS.md` / 遵循仓库根目录 `AGENTS.md` 中的工程规则

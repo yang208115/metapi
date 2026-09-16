@@ -7,6 +7,5 @@
     "rootDir": "src/server",
     "noImplicitAny": false
   },
-  "include": ["src/server/**/*.ts"],
-  "exclude": ["src/server/**/*.test.ts"]
+  "include": ["src/server/**/*.ts"]
 }
