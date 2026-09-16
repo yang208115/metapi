@@ -54,7 +54,6 @@ import { detectDownstreamClientContext } from '../downstreamClientContext.js';
 import { getProxyMaxChannelRetries } from '../../services/proxyChannelRetry.js';
 import { shouldAbortSameSiteEndpointFallback } from '../../services/proxyRetryPolicy.js';
 import { applyOpenAiServiceTierPolicy } from '../serviceTierPolicy.js';
-import { maybeHandleWebSearchOnlySimulation } from '../webSearchSimulation.js';
 import {
   acquireSurfaceChannelLease,
   bindSurfaceStickyChannel,
@@ -311,17 +310,6 @@ export async function handleChatSurfaceRequest(
     upstreamBody,
     claudeOriginalBody,
   } = requestEnvelope.parsed;
-  if (downstreamFormat === 'claude') {
-    const handledSearch = await maybeHandleWebSearchOnlySimulation({
-      app: request.server,
-      request,
-      reply,
-      downstreamFormat: 'claude',
-      body: (claudeOriginalBody || request.body || {}) as Record<string, unknown>,
-      openAiBody: upstreamBody,
-    });
-    if (handledSearch) return;
-  }
   if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
   const downstreamPolicy = getDownstreamRoutingPolicy(request);
   const forcedChannelId = getTesterForcedChannelId({

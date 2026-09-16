@@ -15,9 +15,6 @@ import {
   buildImagesEditRequestEnvelope,
   buildImagesGenerationsRequestEnvelope,
   buildRawProxyRequestEnvelope,
-  buildSearchRequestEnvelope,
-  buildVideoCreateRequestEnvelope,
-  buildVideoInspectRequestEnvelope,
   attachForcedChannelToEnvelope,
   countConversationTurns,
   collectModelTesterModelNames,
@@ -94,23 +91,6 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 const createConversationFileLocalId = () =>
   `draft-file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-const summarizeModeRequest = (
-  mode: PlaygroundMode,
-  input: string,
-  modeState: ModelTesterModeState,
-  videoAction: 'get' | 'delete',
-): string => {
-  if (mode === 'embeddings') return input.trim() || modeState.embeddingsInput.trim() || 'Embedding request';
-  if (mode === 'search') return input.trim() || modeState.searchQuery.trim() || 'Search request';
-  if (mode === 'images.generate' || mode === 'images.edit') return input.trim() || modeState.imagesPrompt.trim() || 'Image request';
-  if (mode === 'videos.create') return input.trim() || modeState.videosPrompt.trim() || 'Video request';
-  if (mode === 'videos.inspect') {
-    const id = input.trim() || modeState.videosInspectId.trim();
-    return `${videoAction.toUpperCase()} ${id || 'video'}`;
-  }
-  return input.trim();
-};
 
 const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -589,20 +569,11 @@ const toNumber = (value: string, fallback: number): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const splitCsvOrLines = (value: string): string[] =>
-  value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
 const CONVERSATION_MODE_OPTIONS: Array<{ value: PlaygroundMode; label: string }> = [
   { value: 'conversation', label: '对话' },
   { value: 'embeddings', label: 'Embeddings' },
-  { value: 'search', label: 'Search' },
   { value: 'images.generate', label: '图片生成' },
   { value: 'images.edit', label: '图片编辑' },
-  { value: 'videos.create', label: '视频创建' },
-  { value: 'videos.inspect', label: '视频查询/删除' },
 ];
 
 const PROTOCOL_OPTIONS: Array<{ value: PlaygroundProtocol; label: string }> = [
@@ -689,14 +660,8 @@ export default function ModelTester() {
   const [debugTimestamp, setDebugTimestamp] = useState('');
   const [nonConversationResult, setNonConversationResult] = useState<unknown>(null);
 
-  const [searchQueryValue, setSearchQueryValue] = useState('');
-  const [searchAllowedDomains, setSearchAllowedDomains] = useState('');
-  const [searchBlockedDomains, setSearchBlockedDomains] = useState('');
-  const [searchMaxResults, setSearchMaxResults] = useState(10);
   const [embeddingInputText, setEmbeddingInputText] = useState('');
   const [assetPrompt, setAssetPrompt] = useState('');
-  const [videoInspectId, setVideoInspectId] = useState('');
-  const [videoInspectAction, setVideoInspectAction] = useState<'GET' | 'DELETE'>('GET');
   const [imageSourceFile, setImageSourceFile] = useState<UploadState | null>(null);
   const [imageMaskFile, setImageMaskFile] = useState<UploadState | null>(null);
   const [conversationFiles, setConversationFiles] = useState<ConversationFileState[]>([]);
@@ -776,12 +741,7 @@ export default function ModelTester() {
     setShowDebugPanel(restored.showDebugPanel);
     setActiveDebugTab(restored.activeDebugTab);
     setEmbeddingInputText(restored.modeState.embeddingsInput);
-    setSearchQueryValue(restored.modeState.searchQuery);
-    setSearchAllowedDomains(restored.modeState.searchAllowedDomains);
-    setSearchBlockedDomains(restored.modeState.searchBlockedDomains);
-    setAssetPrompt(restored.modeState.imagesPrompt || restored.modeState.videosPrompt);
-    setVideoInspectId(restored.modeState.videosInspectId);
-    setVideoInspectAction(restored.inputs.videoInspectAction === 'delete' ? 'DELETE' : 'GET');
+    setAssetPrompt(restored.modeState.imagesPrompt);
     setConversationFiles(restored.conversationFiles);
 
     if (restored.pendingJobId) {
@@ -854,13 +814,6 @@ export default function ModelTester() {
       return;
     }
 
-    if (inputs.mode === 'videos.inspect') {
-      setForcedChannelOptions([]);
-      setForcedChannelHint('视频查询/删除不会重新选路，不能固定通道。');
-      setForcedChannelId(null);
-      return;
-    }
-
     let cancelled = false;
     setLoadingForcedChannels(true);
     setForcedChannelHint('');
@@ -913,13 +866,8 @@ export default function ModelTester() {
       conversationFiles,
       modeState: {
         embeddingsInput: embeddingInputText,
-        searchQuery: searchQueryValue,
-        searchAllowedDomains,
-        searchBlockedDomains,
         imagesPrompt: inputs.mode === 'images.generate' || inputs.mode === 'images.edit' ? assetPrompt : '',
         imagesMaskDataUrl: imageMaskFile?.dataUrl || '',
-        videosPrompt: inputs.mode === 'videos.create' ? assetPrompt : '',
-        videosInspectId: videoInspectId,
         extraJson: customRequestBody,
       },
       pendingPayload,
@@ -946,11 +894,7 @@ export default function ModelTester() {
     parameterEnabled,
     pendingJobId,
     pendingPayload,
-    searchAllowedDomains,
-    searchBlockedDomains,
-    searchQueryValue,
     showDebugPanel,
-    videoInspectId,
   ]);
 
   const handleUploadChange = useCallback(async (
@@ -1269,29 +1213,6 @@ export default function ModelTester() {
       };
     }
 
-    if (inputs.mode === 'search') {
-      if (!searchQueryValue.trim()) return null;
-      return {
-        method: 'POST',
-        path: '/v1/search',
-        requestKind: 'json',
-        stream: false,
-        jobMode: false,
-        rawMode: customRequestMode,
-        ...(customRequestMode
-          ? { rawJsonText: customRequestBody }
-          : {
-            jsonBody: {
-              model: inputs.model || '__search',
-              query: searchQueryValue.trim(),
-              max_results: Math.max(1, Math.min(20, Math.trunc(searchMaxResults || 10))),
-              ...(splitCsvOrLines(searchAllowedDomains).length > 0 ? { allowed_domains: splitCsvOrLines(searchAllowedDomains) } : {}),
-              ...(splitCsvOrLines(searchBlockedDomains).length > 0 ? { blocked_domains: splitCsvOrLines(searchBlockedDomains) } : {}),
-            },
-          }),
-      };
-    }
-
     if (inputs.mode === 'images.generate') {
       if (!assetPrompt.trim()) return null;
       return {
@@ -1337,58 +1258,8 @@ export default function ModelTester() {
       };
     }
 
-    if (inputs.mode === 'videos.create') {
-      if (!assetPrompt.trim()) return null;
-      if (imageSourceFile) {
-        return {
-          method: 'POST',
-          path: '/v1/videos',
-          requestKind: 'multipart',
-          stream: false,
-          jobMode: false,
-          rawMode: false,
-          multipartFields: {
-            model: inputs.model,
-            prompt: assetPrompt.trim(),
-          },
-          multipartFiles: [
-            {
-              field: 'input_reference',
-              name: imageSourceFile.name,
-              mimeType: imageSourceFile.mimeType,
-              dataUrl: imageSourceFile.dataUrl,
-            },
-          ],
-        };
-      }
-
-      return {
-        method: 'POST',
-        path: '/v1/videos',
-        requestKind: 'json',
-        stream: false,
-        jobMode: false,
-        rawMode: customRequestMode,
-        ...(customRequestMode
-          ? { rawJsonText: customRequestBody }
-          : { jsonBody: { model: inputs.model, prompt: assetPrompt.trim() } }),
-      };
-    }
-
-    if (inputs.mode === 'videos.inspect') {
-      if (!videoInspectId.trim()) return null;
-      return {
-        method: videoInspectAction,
-        path: `/v1/videos/${encodeURIComponent(videoInspectId.trim())}`,
-        requestKind: 'empty',
-        stream: false,
-        jobMode: false,
-        rawMode: false,
-      };
-    }
-
     return null;
-  }, [assetPrompt, customRequestBody, customRequestMode, embeddingInputText, imageMaskFile, imageSourceFile, inputs.mode, inputs.model, searchAllowedDomains, searchBlockedDomains, searchMaxResults, searchQueryValue, videoInspectAction, videoInspectId]);
+  }, [assetPrompt, customRequestBody, customRequestMode, embeddingInputText, imageMaskFile, imageSourceFile, inputs.mode, inputs.model]);
 
   const previewPayload = useMemo(() => {
     if (inputs.mode !== 'conversation') {
@@ -1501,17 +1372,14 @@ export default function ModelTester() {
     if (sending || pendingJobId || !inputs.model) return false;
     if (inputs.mode !== 'conversation') {
       if (inputs.mode === 'embeddings') return Boolean(embeddingInputText.trim());
-      if (inputs.mode === 'search') return Boolean(searchQueryValue.trim());
       if (inputs.mode === 'images.generate') return Boolean(assetPrompt.trim());
       if (inputs.mode === 'images.edit') return Boolean(assetPrompt.trim()) && Boolean(imageSourceFile);
-      if (inputs.mode === 'videos.create') return Boolean(assetPrompt.trim());
-      if (inputs.mode === 'videos.inspect') return Boolean(videoInspectId.trim());
       return false;
     }
     const hasPrompt = input.trim().length > 0;
     if (!customRequestMode) return hasPrompt || (conversationFileSupported && conversationFiles.length > 0);
     return hasPrompt || customRequestBody.trim().length > 0;
-  }, [assetPrompt, conversationFileSupported, conversationFiles.length, customRequestBody, customRequestMode, embeddingInputText, imageSourceFile, input, inputs.mode, inputs.model, pendingJobId, searchQueryValue, sending, videoInspectId]);
+  }, [assetPrompt, conversationFileSupported, conversationFiles.length, customRequestBody, customRequestMode, embeddingInputText, imageSourceFile, input, inputs.mode, inputs.model, pendingJobId, sending]);
 
   const startChatJob = useCallback(async (payload: TestChatPayload) => {
     try {
@@ -2114,14 +1982,8 @@ export default function ModelTester() {
     setDebugTimeline([]);
     setDebugTimestamp('');
     setNonConversationResult(null);
-    setSearchQueryValue('');
-    setSearchAllowedDomains('');
-    setSearchBlockedDomains('');
-    setSearchMaxResults(10);
     setEmbeddingInputText('');
     setAssetPrompt('');
-    setVideoInspectId('');
-    setVideoInspectAction('GET');
     setImageSourceFile(null);
     setImageMaskFile(null);
     setConversationFiles([]);
@@ -2495,7 +2357,7 @@ export default function ModelTester() {
               }}
               options={forcedChannelSelectOptions}
               placeholder={loadingForcedChannels ? '加载通道中...' : '自动选路（默认）'}
-              disabled={customRequestMode || inputs.mode === 'videos.inspect' || loadingForcedChannels}
+              disabled={customRequestMode || loadingForcedChannels}
               emptyLabel="当前模型暂无可固定通道"
               menuMaxHeight={300}
             />
@@ -2542,7 +2404,7 @@ export default function ModelTester() {
 
           {inputs.mode !== 'conversation' && (
             <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 14 }}>
-              当前模式默认走同步请求；Search / Embeddings / Images / Videos 会通过通用 proxy tester 直达对应接口。
+              当前模式默认走同步请求；Embeddings / Images 会通过通用 proxy tester 直达对应接口。
             </div>
           )}
 
@@ -2736,9 +2598,8 @@ export default function ModelTester() {
                 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
                     {inputs.mode === 'embeddings' ? 'Embeddings 结果'
-                      : inputs.mode === 'search' ? 'Search 结果'
-                        : inputs.mode.startsWith('images') ? '图片结果'
-                          : '视频任务结果'}
+                      : inputs.mode.startsWith('images') ? '图片结果'
+                        : '结果'}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                     新模式走通用 proxy tester；结果同时会写入右侧调试面板。
@@ -3019,32 +2880,16 @@ export default function ModelTester() {
                     style={{ ...inputBaseStyle, resize: 'vertical' }}
                   />
                 )}
-                {inputs.mode === 'search' && (
-                  <>
-                    <textarea
-                      value={searchQueryValue}
-                      onChange={(event) => setSearchQueryValue(event.target.value)}
-                      rows={3}
-                      placeholder="输入搜索查询"
-                      style={{ ...inputBaseStyle, resize: 'vertical' }}
-                    />
-                    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 120px', gap: 10 }}>
-                      <input value={searchAllowedDomains} onChange={(event) => setSearchAllowedDomains(event.target.value)} placeholder="allowed_domains (逗号分隔)" style={inputBaseStyle} />
-                      <input value={searchBlockedDomains} onChange={(event) => setSearchBlockedDomains(event.target.value)} placeholder="blocked_domains (逗号分隔)" style={inputBaseStyle} />
-                      <input value={searchMaxResults} onChange={(event) => setSearchMaxResults(toNumber(event.target.value, 10))} type="number" min={1} max={20} style={inputBaseStyle} />
-                    </div>
-                  </>
-                )}
-                {(inputs.mode === 'images.generate' || inputs.mode === 'images.edit' || inputs.mode === 'videos.create') && (
+                {(inputs.mode === 'images.generate' || inputs.mode === 'images.edit') && (
                   <>
                     <textarea
                       value={assetPrompt}
                       onChange={(event) => setAssetPrompt(event.target.value)}
                       rows={3}
-                      placeholder={inputs.mode === 'videos.create' ? '输入视频生成提示词' : '输入图片提示词'}
+                      placeholder={'输入图片提示词'}
                       style={{ ...inputBaseStyle, resize: 'vertical' }}
                     />
-                    {(inputs.mode === 'images.edit' || inputs.mode === 'videos.create') && (
+                    {inputs.mode === 'images.edit' && (
                       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : (inputs.mode === 'images.edit' ? '1fr 1fr' : '1fr'), gap: 10 }}>
                         <label style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                           <div style={{ marginBottom: 6 }}>{inputs.mode === 'images.edit' ? '原图' : '参考图'}</div>
@@ -3060,27 +2905,7 @@ export default function ModelTester() {
                     )}
                   </>
                 )}
-                {inputs.mode === 'videos.inspect' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 160px', gap: 10 }}>
-                    <input
-                      value={videoInspectId}
-                      onChange={(event) => setVideoInspectId(event.target.value)}
-                      placeholder="输入 public video id"
-                      style={inputBaseStyle}
-                    />
-                    <ModernSelect
-                      value={videoInspectAction}
-                      onChange={(next) => {
-                        if (!next) return;
-                        setVideoInspectAction(next as 'GET' | 'DELETE');
-                      }}
-                      options={[
-                        { value: 'GET', label: 'GET' },
-                        { value: 'DELETE', label: 'DELETE' },
-                      ]}
-                    />
-                  </div>
-                )}
+
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button

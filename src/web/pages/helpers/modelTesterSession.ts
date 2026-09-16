@@ -17,17 +17,13 @@ export type DebugTab = typeof DEBUG_TABS[keyof typeof DEBUG_TABS];
 export type PlaygroundMode =
   | 'conversation'
   | 'embeddings'
-  | 'search'
   | 'images.generate'
   | 'images.edit'
-  | 'videos.create'
-  | 'videos.inspect';
 
 export type PlaygroundProtocol = 'openai' | 'responses' | 'claude' | 'gemini';
 export type TestTargetFormat = PlaygroundProtocol;
 export type ProxyRequestKind = 'json' | 'multipart' | 'empty';
 export type ProxyRequestMethod = 'POST' | 'GET' | 'DELETE';
-export type VideoInspectAction = 'get' | 'delete';
 export type ChatRole = 'user' | 'assistant' | 'system' | 'developer' | 'tool';
 
 export type ConversationContentPart =
@@ -113,8 +109,6 @@ export type ModelTesterInputs = {
   presence_penalty: number;
   seed: number | null;
   stream: boolean;
-  searchMaxResults: number;
-  videoInspectAction: VideoInspectAction;
 };
 
 export type ParameterEnabled = {
@@ -128,13 +122,8 @@ export type ParameterEnabled = {
 
 export type ModelTesterModeState = {
   embeddingsInput: string;
-  searchQuery: string;
-  searchAllowedDomains: string;
-  searchBlockedDomains: string;
   imagesPrompt: string;
   imagesMaskDataUrl: string;
-  videosPrompt: string;
-  videosInspectId: string;
   extraJson: string;
 };
 
@@ -174,8 +163,6 @@ export const DEFAULT_INPUTS: ModelTesterInputs = {
   presence_penalty: 0,
   seed: null,
   stream: false,
-  searchMaxResults: 10,
-  videoInspectAction: 'get',
 };
 
 export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {
@@ -189,13 +176,8 @@ export const DEFAULT_PARAMETER_ENABLED: ParameterEnabled = {
 
 export const DEFAULT_MODE_STATE: ModelTesterModeState = {
   embeddingsInput: '',
-  searchQuery: '',
-  searchAllowedDomains: '',
-  searchBlockedDomains: '',
   imagesPrompt: '',
   imagesMaskDataUrl: '',
-  videosPrompt: '',
-  videosInspectId: '',
   extraJson: '',
 };
 
@@ -206,11 +188,8 @@ const VALID_DEBUG_TABS: ReadonlySet<string> = new Set(Object.values(DEBUG_TABS))
 const VALID_MODES: ReadonlySet<string> = new Set([
   'conversation',
   'embeddings',
-  'search',
   'images.generate',
   'images.edit',
-  'videos.create',
-  'videos.inspect',
 ]);
 const VALID_PROTOCOLS: ReadonlySet<string> = new Set(['openai', 'responses', 'claude', 'gemini']);
 const VALID_CONVERSATION_DRAFT_STATUSES: ReadonlySet<string> = new Set(['pending', 'uploading', 'uploaded', 'error']);
@@ -251,12 +230,6 @@ const isExactModelPattern = (modelPattern: string): boolean => {
   if (normalized.toLowerCase().startsWith('re:')) return false;
   return !/[\*\?]/.test(normalized);
 };
-
-const splitCommaSeparated = (value: string): string[] =>
-  value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
 
 const createMessageId = (): string => {
   messageCounter += 1;
@@ -714,8 +687,6 @@ const parseInputs = (value: unknown, fallbackModel = ''): ModelTesterInputs => {
     presence_penalty: toFiniteNumber(value.presence_penalty, DEFAULT_INPUTS.presence_penalty),
     seed: toNullableFiniteNumber(value.seed),
     stream: toBoolean(value.stream, DEFAULT_INPUTS.stream),
-    searchMaxResults: Math.max(1, Math.min(20, Math.trunc(toFiniteNumber(value.searchMaxResults, DEFAULT_INPUTS.searchMaxResults)))),
-    videoInspectAction: value.videoInspectAction === 'delete' ? 'delete' : 'get',
   };
 };
 
@@ -774,13 +745,8 @@ const parseModeState = (value: unknown): ModelTesterModeState => {
   if (!isRecord(value)) return { ...DEFAULT_MODE_STATE };
   return {
     embeddingsInput: sanitizeString(value.embeddingsInput),
-    searchQuery: sanitizeString(value.searchQuery),
-    searchAllowedDomains: sanitizeString(value.searchAllowedDomains),
-    searchBlockedDomains: sanitizeString(value.searchBlockedDomains),
     imagesPrompt: sanitizeString(value.imagesPrompt),
     imagesMaskDataUrl: sanitizeString(value.imagesMaskDataUrl),
-    videosPrompt: sanitizeString(value.videosPrompt),
-    videosInspectId: sanitizeString(value.videosInspectId),
     extraJson: sanitizeString(value.extraJson),
   };
 };
@@ -1239,30 +1205,6 @@ export const buildEmbeddingsRequestEnvelope = (
   },
 });
 
-export const buildSearchRequestEnvelope = (
-  inputs: ModelTesterInputs,
-  modeState: ModelTesterModeState,
-): TesterProxyEnvelope => {
-  const jsonBody: Record<string, unknown> = {
-    model: inputs.model || '__search',
-    query: modeState.searchQuery,
-    max_results: inputs.searchMaxResults,
-  };
-  const allowedDomains = splitCommaSeparated(modeState.searchAllowedDomains);
-  const blockedDomains = splitCommaSeparated(modeState.searchBlockedDomains);
-  if (allowedDomains.length > 0) jsonBody.allowed_domains = allowedDomains;
-  if (blockedDomains.length > 0) jsonBody.blocked_domains = blockedDomains;
-  return {
-    method: 'POST',
-    path: '/v1/search',
-    requestKind: 'json',
-    stream: false,
-    jobMode: false,
-    rawMode: false,
-    jsonBody,
-  };
-};
-
 export const buildImagesGenerationsRequestEnvelope = (
   inputs: ModelTesterInputs,
   modeState: ModelTesterModeState,
@@ -1316,34 +1258,6 @@ export const buildImagesEditRequestEnvelope = (
     prompt: modeState.imagesPrompt,
   },
   multipartFiles: files,
-});
-
-export const buildVideoCreateRequestEnvelope = (
-  inputs: ModelTesterInputs,
-  modeState: ModelTesterModeState,
-  files: PlaygroundMultipartFile[],
-): TesterProxyEnvelope => ({
-  method: 'POST',
-  path: '/v1/videos',
-  requestKind: files.length > 0 ? 'multipart' : 'json',
-  stream: false,
-  jobMode: false,
-  rawMode: false,
-  jsonBody: files.length > 0 ? undefined : { model: inputs.model, prompt: modeState.videosPrompt },
-  multipartFields: files.length > 0 ? { model: inputs.model, prompt: modeState.videosPrompt } : undefined,
-  multipartFiles: files.length > 0 ? files : undefined,
-});
-
-export const buildVideoInspectRequestEnvelope = (
-  inputs: ModelTesterInputs,
-  modeState: ModelTesterModeState,
-): TesterProxyEnvelope => ({
-  method: inputs.videoInspectAction === 'delete' ? 'DELETE' : 'GET',
-  path: `/v1/videos/${encodeURIComponent(modeState.videosInspectId.trim())}`,
-  requestKind: 'empty',
-  stream: false,
-  jobMode: false,
-  rawMode: false,
 });
 
 export const buildApiPayload = (

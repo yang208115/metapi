@@ -68,7 +68,6 @@ import {
 import { detectDownstreamClientContext } from '../downstreamClientContext.js';
 import { validateExternalResponsesHttpRequest } from '../responsesPreflight.js';
 import { applyOpenAiServiceTierPolicy } from '../serviceTierPolicy.js';
-import { maybeHandleWebSearchOnlySimulation } from '../webSearchSimulation.js';
 import { getProxyMaxChannelRetries } from '../../services/proxyChannelRetry.js';
 import { shouldAbortSameSiteEndpointFallback } from '../../services/proxyRetryPolicy.js';
 import {
@@ -291,16 +290,6 @@ export async function handleOpenAiResponsesSurfaceRequest(
           type: 'invalid_request_error',
         },
       });
-    }
-    if (!isCompactRequest) {
-      const handledSearch = await maybeHandleWebSearchOnlySimulation({
-        app: request.server,
-        request,
-        reply,
-        downstreamFormat: 'responses',
-        body: requestEnvelope.parsed.normalizedBody,
-      });
-      if (handledSearch) return;
     }
     if (!await ensureModelAllowedForDownstreamKey(request, reply, requestedModel)) return;
     const downstreamPolicy = getDownstreamRoutingPolicy(request);

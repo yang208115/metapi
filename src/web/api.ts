@@ -301,8 +301,6 @@ function resolveProxyTestTimeoutMs(data: ProxyTestRequestEnvelope) {
     return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
   if (data.path === "/v1/images/edits")
     return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
-  if (data.path === "/v1/videos" && data.method === "POST")
-    return LONG_RUNNING_PROXY_TEST_TIMEOUT_MS;
   return DEFAULT_PROXY_TEST_TIMEOUT_MS;
 }
 
@@ -379,7 +377,6 @@ export type RuntimeSettingsPayload = {
   proxyDebugMaxBodyBytes?: number;
   logCleanupCron?: string;
   logCleanupUsageLogsEnabled?: boolean;
-  logCleanupProgramLogsEnabled?: boolean;
   logCleanupRetentionDays?: number;
   webhookUrl?: string;
   barkUrl?: string;
@@ -954,14 +951,6 @@ export const api = {
       body: JSON.stringify({ query, limit: 20 }),
     }),
 
-  // Events
-  getEvents: (params?: string) =>
-    request(`/api/events${params ? "?" + params : ""}`),
-  getEventCount: () => request("/api/events/count"),
-  markEventRead: (id: number) =>
-    request(`/api/events/${id}/read`, { method: "POST" }),
-  markAllEventsRead: () => request("/api/events/read-all", { method: "POST" }),
-  clearEvents: () => request("/api/events", { method: "DELETE" }),
   getTasks: (limit = 50) =>
     request(
       `/api/tasks?limit=${Math.max(1, Math.min(200, Math.trunc(limit)))}`,
@@ -1069,31 +1058,6 @@ export const api = {
     request("/api/settings/backup/import", {
       method: "POST",
       body: JSON.stringify({ data }),
-    }),
-  getBackupWebdavConfig: () => request("/api/settings/backup/webdav"),
-  saveBackupWebdavConfig: (data: {
-    enabled: boolean;
-    fileUrl: string;
-    username: string;
-    password?: string;
-    clearPassword?: boolean;
-    exportType: "all" | "accounts" | "preferences";
-  }) =>
-    request("/api/settings/backup/webdav", {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  exportBackupToWebdav: (type?: "all" | "accounts" | "preferences") =>
-    request("/api/settings/backup/webdav/export", {
-      method: "POST",
-      body: JSON.stringify(type ? { type } : {}),
-      timeoutMs: 60_000,
-    }),
-  importBackupFromWebdav: () =>
-    request("/api/settings/backup/webdav/import", {
-      method: "POST",
-      body: JSON.stringify({}),
-      timeoutMs: 60_000,
     }),
   clearRuntimeCache: () =>
     request("/api/settings/maintenance/clear-cache", { method: "POST" }),

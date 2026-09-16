@@ -47,7 +47,6 @@ type PayloadRulesEditorDrafts = Record<PayloadRulesEditorSectionKey, string>;
 type RuntimeSettings = {
   logCleanupCron: string;
   logCleanupUsageLogsEnabled: boolean;
-  logCleanupProgramLogsEnabled: boolean;
   logCleanupRetentionDays: number;
   codexUpstreamWebsocketEnabled: boolean;
   responsesCompactFallbackToResponsesEnabled: boolean;
@@ -324,7 +323,6 @@ export default function Settings() {
   const [runtime, setRuntime] = useState<RuntimeSettings>({
     logCleanupCron: '0 6 * * *',
     logCleanupUsageLogsEnabled: false,
-    logCleanupProgramLogsEnabled: false,
     logCleanupRetentionDays: 30,
     codexUpstreamWebsocketEnabled: false,
     responsesCompactFallbackToResponsesEnabled: false,
@@ -616,7 +614,6 @@ export default function Settings() {
       setRuntime({
         logCleanupCron: runtimeInfo.logCleanupCron || '0 6 * * *',
         logCleanupUsageLogsEnabled: !!runtimeInfo.logCleanupUsageLogsEnabled,
-        logCleanupProgramLogsEnabled: !!runtimeInfo.logCleanupProgramLogsEnabled,
         logCleanupRetentionDays: Number(runtimeInfo.logCleanupRetentionDays) >= 1
           ? Math.trunc(Number(runtimeInfo.logCleanupRetentionDays))
           : 30,
@@ -729,7 +726,6 @@ export default function Settings() {
       await api.updateRuntimeSettings({
         logCleanupCron: runtime.logCleanupCron,
         logCleanupUsageLogsEnabled: runtime.logCleanupUsageLogsEnabled,
-        logCleanupProgramLogsEnabled: runtime.logCleanupProgramLogsEnabled,
         logCleanupRetentionDays: runtime.logCleanupRetentionDays,
       });
       toast.success('定时任务设置已保存');
@@ -1264,17 +1260,9 @@ export default function Settings() {
                 />
                 清理使用日志
               </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--color-text-secondary)' }}>
-                <input
-                  type="checkbox"
-                  checked={runtime.logCleanupProgramLogsEnabled}
-                  onChange={(e) => setRuntime((prev) => ({ ...prev, logCleanupProgramLogsEnabled: e.target.checked }))}
-                />
-                清理程序日志
-              </label>
             </div>
             <div style={{ fontSize: 12, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-              默认每天早上 6 点执行。按每次定时任务执行时间，清理早于“保留天数”的日志；两个选项都不勾选时不会实际删除日志。
+              默认每天早上 6 点执行。按每次定时任务执行时间，清理早于“保留天数”的日志；未勾选时不会实际删除使用日志。
             </div>
           </div>
           <div style={{ marginTop: 12 }}>

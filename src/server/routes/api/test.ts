@@ -104,10 +104,7 @@ const ALLOWED_PROXY_PATH_PATTERNS: RegExp[] = [
   /^\/v1\/responses(?:\/compact)?(?:\?.*)?$/i,
   /^\/v1\/messages(?:\?.*)?$/i,
   /^\/v1\/embeddings(?:\?.*)?$/i,
-  /^\/v1\/search(?:\?.*)?$/i,
   /^\/v1\/images\/(?:generations|edits)(?:\?.*)?$/i,
-  /^\/v1\/videos(?:\?.*)?$/i,
-  /^\/v1\/videos\/[^/?#]+(?:\?.*)?$/i,
   /^\/gemini\/[^/]+\/models(?:\?.*)?$/i,
   /^\/gemini\/[^/]+\/models\/.+(?:\?.*)?$/i,
   /^\/v1beta\/models(?:\?.*)?$/i,
@@ -438,10 +435,6 @@ function validateProxyEnvelope(
       });
       return null;
     }
-  }
-
-  if (requestKind === 'empty' && (method === 'POST' || path === '/v1/search')) {
-    // keep explicit empty body path legal, no additional validation
   }
 
   return envelope;

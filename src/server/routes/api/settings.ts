@@ -10,11 +10,7 @@ import { updateLogCleanupSettings } from '../../services/logCleanupScheduler.js'
 import { sendNotification } from '../../services/notifyService.js';
 import {
   exportBackup,
-  exportBackupToWebdav,
-  getBackupWebdavConfig,
   importBackup,
-  importBackupFromWebdav,
-  saveBackupWebdavConfig,
   type BackupExportType,
 } from '../../services/backupService.js';
 import { startBackgroundTask } from '../../services/backgroundTaskService.js';
@@ -30,10 +26,8 @@ import {
   parseDatabaseMigrationPayload,
   parseBackupImportPayload,
   parseRuntimeSettingsPayload,
-  parseBackupWebdavConfigPayload,
-  parseBackupWebdavExportPayload,
 } from '../../contracts/settingsRoutePayloads.js';
-import { formatUtcSqlDateTime, getResolvedTimeZone } from '../../services/localTimeService.js';
+import { getResolvedTimeZone } from '../../services/localTimeService.js';
 import { extractClientIp, findInvalidIpAllowlistEntries, isIpAllowed } from '../../middleware/auth.js';
 import { invalidateSiteProxyCache, normalizeSiteProxyUrl, withExplicitProxyRequestInit } from '../../services/siteProxy.js';
 import { performFactoryReset } from '../../services/factoryResetService.js';
@@ -63,7 +57,6 @@ interface RuntimeSettingsBody {
   proxyDebugMaxBodyBytes?: number;
   logCleanupCron?: string;
   logCleanupUsageLogsEnabled?: boolean;
-  logCleanupProgramLogsEnabled?: boolean;
   logCleanupRetentionDays?: number;
   webhookUrl?: string;
   barkUrl?: string;
@@ -108,15 +101,6 @@ interface SystemProxyTestBody {
   proxyUrl?: unknown;
 }
 
-interface BackupWebdavConfigBody {
-  enabled?: unknown;
-  fileUrl?: unknown;
-  username?: unknown;
-  password?: unknown;
-  clearPassword?: unknown;
-  exportType?: unknown;
-}
-
 type RuntimeDatabaseConfig = {
   dialect: MigrationDialect;
   connectionString: string;
@@ -141,25 +125,6 @@ function maskSecret(value: string): string {
 }
 
 
-
-async function appendSettingsEvent(input: {
-  type: 'balance' | 'proxy' | 'status' | 'token';
-  title: string;
-  message: string;
-  level?: 'info' | 'warning' | 'error';
-}) {
-  try {
-    const createdAt = formatUtcSqlDateTime(new Date());
-    await db.insert(schema.events).values({
-      type: input.type,
-      title: input.title,
-      message: input.message,
-      level: input.level || 'info',
-      relatedType: 'settings',
-      createdAt,
-    }).run();
-  } catch { }
-}
 
 function toPositiveNumberOrFallback(value: unknown, fallback: number) {
   const n = Number(value);
@@ -333,13 +298,6 @@ function applyImportedSettingToRuntime(key: string, value: unknown) {
       if (typeof value !== 'boolean') return;
       config.logCleanupConfigured = true;
       updateLogCleanupSettings({ usageLogsEnabled: value });
-      stopProxyLogRetentionService();
-      return;
-    }
-    case 'log_cleanup_program_logs_enabled': {
-      if (typeof value !== 'boolean') return;
-      config.logCleanupConfigured = true;
-      updateLogCleanupSettings({ programLogsEnabled: value });
       stopProxyLogRetentionService();
       return;
     }
@@ -651,7 +609,6 @@ function getRuntimeSettingsResponse(currentAdminIp = '') {
   return {
     logCleanupCron: config.logCleanupCron,
     logCleanupUsageLogsEnabled: config.logCleanupUsageLogsEnabled,
-    logCleanupProgramLogsEnabled: config.logCleanupProgramLogsEnabled,
     logCleanupRetentionDays: config.logCleanupRetentionDays,
     codexUpstreamWebsocketEnabled: config.codexUpstreamWebsocketEnabled,
     responsesCompactFallbackToResponsesEnabled: config.responsesCompactFallbackToResponsesEnabled,
@@ -920,7 +877,6 @@ export async function settingsRoutes(app: FastifyInstance) {
     const logCleanupTouched =
       body.logCleanupCron !== undefined
       || body.logCleanupUsageLogsEnabled !== undefined
-      || body.logCleanupProgramLogsEnabled !== undefined
       || body.logCleanupRetentionDays !== undefined;
 
     if (logCleanupTouched) {
@@ -941,18 +897,11 @@ export async function settingsRoutes(app: FastifyInstance) {
       const nextUsageLogsEnabled = body.logCleanupUsageLogsEnabled !== undefined
         ? !!body.logCleanupUsageLogsEnabled
         : config.logCleanupUsageLogsEnabled;
-      const nextProgramLogsEnabled = body.logCleanupProgramLogsEnabled !== undefined
-        ? !!body.logCleanupProgramLogsEnabled
-        : config.logCleanupProgramLogsEnabled;
-
       if (nextLogCleanupCron !== config.logCleanupCron) {
         changedLabels.push(`日志清理 Cron（${config.logCleanupCron} -> ${nextLogCleanupCron}）`);
       }
       if (nextUsageLogsEnabled !== config.logCleanupUsageLogsEnabled) {
         changedLabels.push(`自动清理使用日志（${config.logCleanupUsageLogsEnabled ? '开启' : '关闭'} -> ${nextUsageLogsEnabled ? '开启' : '关闭'}）`);
-      }
-      if (nextProgramLogsEnabled !== config.logCleanupProgramLogsEnabled) {
-        changedLabels.push(`自动清理程序日志（${config.logCleanupProgramLogsEnabled ? '开启' : '关闭'} -> ${nextProgramLogsEnabled ? '开启' : '关闭'}）`);
       }
       if (nextLogCleanupRetentionDays !== config.logCleanupRetentionDays) {
         changedLabels.push(`日志清理保留天数（${config.logCleanupRetentionDays} -> ${nextLogCleanupRetentionDays}）`);
@@ -962,13 +911,11 @@ export async function settingsRoutes(app: FastifyInstance) {
       updateLogCleanupSettings({
         cronExpr: nextLogCleanupCron,
         usageLogsEnabled: nextUsageLogsEnabled,
-        programLogsEnabled: nextProgramLogsEnabled,
         retentionDays: nextLogCleanupRetentionDays,
       });
       stopProxyLogRetentionService();
       upsertSetting('log_cleanup_cron', nextLogCleanupCron);
       upsertSetting('log_cleanup_usage_logs_enabled', nextUsageLogsEnabled);
-      upsertSetting('log_cleanup_program_logs_enabled', nextProgramLogsEnabled);
       upsertSetting('log_cleanup_retention_days', nextLogCleanupRetentionDays);
     }
 
@@ -1567,18 +1514,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       await upsertSetting('payload_rules', pendingPayloadRules);
     }
 
-    if (changedLabels.length > 0) {
-      let eventType: 'balance' | 'proxy' | 'status' | 'token' = 'status';
-      if (changedLabels.length === 1) {
-        if (changedLabels[0] === '代理访问 Token') eventType = 'proxy';
-      }
-      appendSettingsEvent({
-        type: eventType,
-        title: '运行时设置已更新',
-        message: `已更新：${changedLabels.join('、')}`,
-      });
-    }
-
     return {
       success: true,
       message: '运行时设置已更新',
@@ -1608,12 +1543,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       await upsertSetting(DB_TYPE_SETTING_KEY, normalized.dialect);
       await upsertSetting(DB_URL_SETTING_KEY, normalized.connectionString);
       await upsertSetting(DB_SSL_SETTING_KEY, normalized.ssl);
-
-      await appendSettingsEvent({
-        type: 'status',
-        title: '数据库运行配置已更新',
-        message: `已保存运行数据库配置：${normalized.dialect}${normalized.ssl ? ' (SSL)' : ''}（重启后生效）`,
-      });
 
       const saved: RuntimeDatabaseConfig = {
         dialect: normalized.dialect,
@@ -1669,11 +1598,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       }
 
       const result = await migrateCurrentDatabase(parsedBody.data);
-      appendSettingsEvent({
-        type: 'status',
-        title: '数据库迁移已完成',
-        message: `目标 ${result.dialect}，已迁移站点 ${result.rows.sites}、账号 ${result.rows.accounts}、令牌 ${result.rows.accountTokens}、路由 ${result.rows.tokenRoutes}、通道 ${result.rows.routeChannels}、设置 ${result.rows.settings}`,
-      });
       return {
         success: true,
         message: '数据库迁移完成',
@@ -1716,76 +1640,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       return reply.code(400).send({
         success: false,
         message: err?.message || '导入失败',
-      });
-    }
-  });
-
-  app.get('/api/settings/backup/webdav', async () => {
-    return getBackupWebdavConfig();
-  });
-
-  app.put<{ Body: BackupWebdavConfigBody }>('/api/settings/backup/webdav', async (request, reply) => {
-    try {
-      const parsedBody = parseBackupWebdavConfigPayload(request.body);
-      if (!parsedBody.success) {
-        return reply.code(400).send({
-          success: false,
-          message: parsedBody.error,
-        });
-      }
-
-      const body = parsedBody.data;
-      const result = await saveBackupWebdavConfig({
-        enabled: body.enabled === undefined ? undefined : body.enabled === true,
-        fileUrl: body.fileUrl === undefined ? undefined : String(body.fileUrl || ''),
-        username: body.username === undefined ? undefined : String(body.username || ''),
-        password: body.password === undefined ? undefined : String(body.password),
-        clearPassword: body.clearPassword === true,
-        exportType: body.exportType === undefined ? undefined : String(body.exportType || '') as BackupExportType,
-      });
-      return result;
-    } catch (err: any) {
-      return reply.code(400).send({
-        success: false,
-        message: err?.message || 'WebDAV 配置保存失败',
-      });
-    }
-  });
-
-  app.post<{ Body: { type?: string } }>('/api/settings/backup/webdav/export', async (request, reply) => {
-    try {
-      const parsedBody = parseBackupWebdavExportPayload(request.body);
-      if (!parsedBody.success) {
-        return reply.code(400).send({
-          success: false,
-          message: parsedBody.error,
-        });
-      }
-
-      const rawType = typeof parsedBody.data.type === 'string' ? parsedBody.data.type.trim().toLowerCase() : '';
-      const type: BackupExportType | undefined = rawType === 'all' || rawType === 'accounts' || rawType === 'preferences'
-        ? rawType
-        : undefined;
-      return await exportBackupToWebdav(type);
-    } catch (err: any) {
-      return reply.code(400).send({
-        success: false,
-        message: err?.message || 'WebDAV 导出失败',
-      });
-    }
-  });
-
-  app.post('/api/settings/backup/webdav/import', async (_, reply) => {
-    try {
-      const result = await importBackupFromWebdav();
-      for (const item of result.appliedSettings) {
-        applyImportedSettingToRuntime(item.key, item.value);
-      }
-      return result;
-    } catch (err: any) {
-      return reply.code(400).send({
-        success: false,
-        message: err?.message || 'WebDAV 导入失败',
       });
     }
   });
@@ -1867,13 +1721,6 @@ export async function settingsRoutes(app: FastifyInstance) {
       balanceUsed: 0,
       updatedAt: new Date().toISOString(),
     }).run();
-
-    appendSettingsEvent({
-      type: 'status',
-      title: '占用统计与使用日志已清理',
-      message: `已清理使用日志 ${deletedProxyLogs} 条，并重置路由与账号占用统计`,
-      level: 'warning',
-    });
 
     return {
       success: true,

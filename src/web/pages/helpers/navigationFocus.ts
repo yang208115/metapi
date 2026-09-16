@@ -88,5 +88,5 @@ export function buildEventNavigationPath(event: {
   if (eventType === 'proxy') {
     return '/logs';
   }
-  return '/events';
+  return '/logs';
 }

@@ -2,7 +2,6 @@
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { ToastProvider, useToast } from './components/Toast.js';
 import SearchModal from './components/SearchModal.js';
-import NotificationPanel from './components/NotificationPanel.js';
 import TooltipLayer from './components/TooltipLayer.js';
 import { api } from './api.js';
 import { clearAuthSession, hasValidAuthSession, persistAuthSession } from './authSession.js';
@@ -10,7 +9,6 @@ import {
   FIRST_USE_DOC_REMINDER_KEY,
   LEGACY_THEME_STORAGE_KEY,
   THEME_MODE_STORAGE_KEY,
-  USER_PROFILE_STORAGE_KEY,
 } from './appLocalState.js';
 import { I18nProvider, useI18n } from './i18n.js';
 import { resolveLoginErrorMessage } from './loginError.js';
@@ -18,7 +16,6 @@ import { SITE_DOCS_URL, SITE_GITHUB_URL } from './docsLink.js';
 import { useAnimatedVisibility } from './components/useAnimatedVisibility.js';
 import { useIsMobile } from './components/useIsMobile.js';
 import { MobileDrawer } from './components/MobileDrawer.js';
-import CenteredModal from './components/CenteredModal.js';
 const Dashboard = lazy(() => import('./pages/Dashboard.js'));
 const Sites = lazy(() => import('./pages/Sites.js'));
 const Accounts = lazy(() => import('./pages/Accounts.js'));
@@ -29,34 +26,10 @@ const Settings = lazy(() => import('./pages/Settings.js'));
 const DownstreamKeys = lazy(() => import('./pages/DownstreamKeys.js'));
 const ImportExport = lazy(() => import('./pages/ImportExport.js'));
 const NotificationSettings = lazy(() => import('./pages/NotificationSettings.js'));
-const ProgramLogs = lazy(() => import('./pages/ProgramLogs.js'));
 const Models = lazy(() => import('./pages/Models.js'));
-const About = lazy(() => import('./pages/About.js'));
 const ModelTester = lazy(() => import('./pages/ModelTester.js'));
 
 type ThemeMode = 'system' | 'light' | 'dark';
-
-type UserProfile = {
-  name: string;
-  avatarSeed: string;
-  avatarStyle: string;
-};
-const DICEBEAR_STYLES = [
-  'pixel-art',
-  'pixel-art-neutral',
-  'bottts',
-  'bottts-neutral',
-  'identicon',
-  'initials',
-  'avataaars',
-  'avataaars-neutral',
-  'personas',
-  'lorelei',
-  'lorelei-neutral',
-  'fun-emoji',
-] as const;
-
-type DicebearStyle = typeof DICEBEAR_STYLES[number];
 
 function resolveStoredThemeMode(): ThemeMode {
   const saved = localStorage.getItem(THEME_MODE_STORAGE_KEY);
@@ -64,64 +37,6 @@ function resolveStoredThemeMode(): ThemeMode {
   const legacy = localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   if (legacy === 'light' || legacy === 'dark') return legacy;
   return 'system';
-}
-
-function createRandomAvatarSeed(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `seed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function hashString(input: string): number {
-  let hash = 0;
-  for (let i = 0; i < input.length; i += 1) {
-    hash = (hash << 5) - hash + input.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function pickDicebearStyle(seed: string): DicebearStyle {
-  const index = hashString(seed || 'default') % DICEBEAR_STYLES.length;
-  return DICEBEAR_STYLES[index];
-}
-
-function buildDicebearAvatarUrl(style: string, seed: string): string {
-  const safeStyle = DICEBEAR_STYLES.includes(style as DicebearStyle)
-    ? style
-    : pickDicebearStyle(seed);
-  const safeSeed = (seed || 'default').trim() || 'default';
-  return `https://api.dicebear.com/9.x/${safeStyle}/svg?seed=${encodeURIComponent(safeSeed)}`;
-}
-
-function resolveStoredProfile(): UserProfile {
-  try {
-    const raw = localStorage.getItem(USER_PROFILE_STORAGE_KEY);
-    if (!raw) {
-      const avatarSeed = createRandomAvatarSeed();
-      return { name: '管理员', avatarSeed, avatarStyle: pickDicebearStyle(avatarSeed) };
-    }
-    const parsed = JSON.parse(raw) as Partial<UserProfile> & { avatar?: string };
-    const name = typeof parsed?.name === 'string' ? parsed.name.trim() : '';
-    const avatarSeed = typeof parsed?.avatarSeed === 'string'
-      ? parsed.avatarSeed.trim()
-      : (typeof parsed?.avatar === 'string' ? parsed.avatar.trim() : '');
-    const resolvedSeed = avatarSeed || createRandomAvatarSeed();
-    const avatarStyle = typeof parsed?.avatarStyle === 'string'
-      ? parsed.avatarStyle.trim()
-      : '';
-    return {
-      name: name || '管理员',
-      avatarSeed: resolvedSeed,
-      avatarStyle: DICEBEAR_STYLES.includes(avatarStyle as DicebearStyle)
-        ? avatarStyle
-        : pickDicebearStyle(resolvedSeed),
-    };
-  } catch {
-    const avatarSeed = createRandomAvatarSeed();
-    return { name: '管理员', avatarSeed, avatarStyle: pickDicebearStyle(avatarSeed) };
-  }
 }
 
 export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (text: string) => string }) {
@@ -277,128 +192,6 @@ export function Login({ onLogin, t }: { onLogin: (token: string) => void; t: (te
   );
 }
 
-function UserProfileModal({
-  open,
-  profile,
-  onClose,
-  onSave,
-  t,
-}: {
-  open: boolean;
-  profile: UserProfile;
-  onClose: () => void;
-  onSave: (nextProfile: UserProfile) => void;
-  t: (text: string) => string;
-}) {
-  const [name, setName] = useState(profile.name);
-  const [avatarSeed, setAvatarSeed] = useState(profile.avatarSeed);
-  const [avatarStyle, setAvatarStyle] = useState(profile.avatarStyle);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!open) return;
-    setName(profile.name);
-    setAvatarSeed(profile.avatarSeed);
-    setAvatarStyle(profile.avatarStyle);
-    setError('');
-  }, [open, profile]);
-
-  const avatarUrl = buildDicebearAvatarUrl(avatarStyle, avatarSeed);
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '10px 14px',
-    border: '1px solid var(--color-border)',
-    borderRadius: 'var(--radius-sm)',
-    fontSize: 13,
-    outline: 'none',
-    background: 'var(--color-bg)',
-    color: 'var(--color-text-primary)',
-  };
-
-  const handleRandomAvatar = () => {
-    const nextSeed = createRandomAvatarSeed();
-    setAvatarSeed(nextSeed);
-    setAvatarStyle(pickDicebearStyle(nextSeed));
-  };
-
-  const handleSubmit = () => {
-    const normalizedName = name.trim();
-    if (!normalizedName) {
-      setError(t('用户名不能为空'));
-      return;
-    }
-    if (Array.from(normalizedName).length > 24) {
-      setError(t('用户名最多 24 个字符'));
-      return;
-    }
-    onSave({
-      name: normalizedName,
-      avatarSeed: avatarSeed.trim() || createRandomAvatarSeed(),
-      avatarStyle: DICEBEAR_STYLES.includes(avatarStyle as DicebearStyle)
-        ? avatarStyle
-        : pickDicebearStyle(avatarSeed),
-    });
-  };
-
-  return (
-    <CenteredModal
-      open={open}
-      onClose={onClose}
-      title={t('个人信息')}
-      maxWidth={440}
-      closeOnBackdrop
-      closeOnEscape
-      bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-      footer={(
-        <>
-          <button onClick={onClose} className="btn btn-ghost">{t('取消')}</button>
-          <button onClick={handleSubmit} className="btn btn-primary">{t('保存')}</button>
-        </>
-      )}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
-        <div className="topbar-avatar" style={{ width: 40, height: 40, fontSize: 14 }}>
-          <img
-            src={avatarUrl}
-            alt={name.trim() || 'avatar'}
-            style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-          />
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{t('右上角头像实时预览')}</div>
-      </div>
-
-      <div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>{t('用户名')}</div>
-        <input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            setError('');
-          }}
-          placeholder={t('例如：小王')}
-          style={inputStyle}
-        />
-      </div>
-
-      <div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>
-          {t('头像（Dicebear 随机） · 风格：')}{avatarStyle}
-        </div>
-        <button type="button" className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={handleRandomAvatar}>
-          {t('换一个随机头像')}
-        </button>
-      </div>
-
-      {error && (
-        <div className="alert alert-error">
-          {error}
-        </div>
-      )}
-    </CenteredModal>
-  );
-}
-
 export const sidebarGroups = [
   {
     label: '控制台',
@@ -415,7 +208,6 @@ export const sidebarGroups = [
     label: '系统',
     items: [
       { to: '/settings', label: '设置', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
-      { to: '/events', label: '程序日志', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg> },
       { to: '/settings/import-export', label: '导入/导出', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 7h10M7 12h6m-6 5h10M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" /></svg> },
       { to: '/settings/notify', label: '通知设置', icon: <svg className="sidebar-item-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg> },
     ],
@@ -426,7 +218,6 @@ const topNavItems = [
   { label: '控制台', to: '/' },
   { label: '模型', to: '/models' },
   { label: '模型操练场', to: '/playground' },
-  { label: '关于', to: '/about' },
 ];
 
 function PageTransition({ children }: { children: React.ReactNode }) {
@@ -453,25 +244,17 @@ function AppShell() {
   const themeMenuRef = useRef<HTMLDivElement>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => resolveStoredThemeMode());
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => resolveStoredProfile());
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const themeMenuPresence = useAnimatedVisibility(showThemeMenu, 160);
   const userMenuPresence = useAnimatedVisibility(showUserMenu, 160);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const notifBtnRef = useRef<HTMLButtonElement>(null);
-  const latestTaskEventIdRef = useRef(0);
   const toast = useToast();
   const isMobile = useIsMobile();
   const resolvedTheme: 'light' | 'dark' = themeMode === 'system'
     ? (systemPrefersDark ? 'dark' : 'light')
     : themeMode;
-  const rawDisplayName = (userProfile.name || '').trim();
-  const displayName = rawDisplayName ? (rawDisplayName === '管理员' ? t('管理员') : rawDisplayName) : t('管理员');
+  const displayName = t('管理员');
   const resolvedThemeLabel = resolvedTheme === 'dark' ? t('深色') : t('浅色');
-  const avatarUrl = buildDicebearAvatarUrl(userProfile.avatarStyle, userProfile.avatarSeed);
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -520,61 +303,6 @@ function AppShell() {
 
   useEffect(() => {
     if (!authed) return;
-    let cancelled = false;
-
-    const pollEvents = async () => {
-      try {
-        const recentEvents = await api.getEvents('limit=30');
-
-        if (cancelled) return;
-        const rows = Array.isArray(recentEvents) ? recentEvents : [];
-        const unread = rows.filter((r: any) => !r.read).length;
-        setUnreadCount(unread);
-        const maxId = rows.reduce((acc: number, row: any) => Math.max(acc, Number(row?.id) || 0), 0);
-
-        if (latestTaskEventIdRef.current === 0) {
-          latestTaskEventIdRef.current = maxId;
-          return;
-        }
-
-        const newTaskEvents = rows
-          .filter((row: any) => (
-            (Number(row?.id) || 0) > latestTaskEventIdRef.current
-            && row?.relatedType === 'task'
-            && !String(row?.title || '').includes('已开始')
-          ))
-          .sort((a: any, b: any) => (a.id || 0) - (b.id || 0))
-          .slice(-3);
-
-        for (const event of newTaskEvents) {
-          const message = event?.message || event?.title || t('任务状态已更新');
-          if (event?.level === 'error') {
-            toast.error(message);
-          } else if (event?.level === 'warning') {
-            toast.info(message);
-          } else {
-            toast.success(message);
-          }
-        }
-
-        if (maxId > latestTaskEventIdRef.current) {
-          latestTaskEventIdRef.current = maxId;
-        }
-      } catch {
-        // ignore polling errors
-      }
-    };
-
-    void pollEvents();
-    const timer = setInterval(() => { void pollEvents(); }, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [authed, toast]);
-
-  useEffect(() => {
-    if (!authed) return;
 
     const check = () => {
       if (hasValidAuthSession(localStorage)) return;
@@ -610,21 +338,6 @@ function AppShell() {
   const handleSelectThemeMode = (nextMode: ThemeMode) => {
     setThemeMode(nextMode);
     setShowThemeMenu(false);
-  };
-
-  const handleSaveProfile = (nextProfile: UserProfile) => {
-    const normalizedSeed = nextProfile.avatarSeed.trim() || createRandomAvatarSeed();
-    const normalized = {
-      name: nextProfile.name.trim() || t('管理员'),
-      avatarSeed: normalizedSeed,
-      avatarStyle: DICEBEAR_STYLES.includes(nextProfile.avatarStyle as DicebearStyle)
-        ? nextProfile.avatarStyle
-        : pickDicebearStyle(normalizedSeed),
-    };
-    setUserProfile(normalized);
-    localStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(normalized));
-    setShowProfileModal(false);
-    toast.success(t('个人信息已保存'));
   };
 
   if (!authed) {
@@ -674,17 +387,6 @@ function AppShell() {
             <span className="topbar-search-label">{t('搜索')}</span>
             <kbd className="topbar-search-kbd">Ctrl K</kbd>
           </button>
-          <div style={{ position: 'relative' }}>
-            <button ref={notifBtnRef} className="topbar-icon-btn" aria-label={t('通知')} onClick={() => setShowNotifications(!showNotifications)}>
-              <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-              {unreadCount > 0 && (
-                <span className="topbar-badge">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-            <NotificationPanel open={showNotifications} onClose={() => setShowNotifications(false)} anchorRef={notifBtnRef} onUnreadCountChange={setUnreadCount} />
-          </div>
           <div ref={themeMenuRef} style={{ position: 'relative' }}>
             <button
               className="topbar-icon-btn"
@@ -742,24 +444,10 @@ function AppShell() {
                 setShowThemeMenu(false);
               }}
             >
-              <img
-                src={avatarUrl}
-                alt={displayName}
-                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-              />
+              <span aria-hidden="true">管</span>
             </button>
             {userMenuPresence.shouldRender && (
               <div className={`user-dropdown ${userMenuPresence.isVisible ? '' : 'is-closing'}`.trim()}>
-                <button
-                  className="user-dropdown-item"
-                  onClick={() => {
-                    setShowProfileModal(true);
-                    setShowUserMenu(false);
-                  }}
-                >
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                  {t('个人信息')}
-                </button>
                 <button onClick={() => {
                   clearAuthSession(localStorage);
                   setAuthed(false);
@@ -859,12 +547,10 @@ function AppShell() {
                 <Route path="/logs" element={<ProxyLogs />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/downstream-keys" element={<DownstreamKeys />} />
-                <Route path="/events" element={<ProgramLogs />} />
                 <Route path="/settings/import-export" element={<ImportExport />} />
                 <Route path="/settings/notify" element={<NotificationSettings />} />
                 <Route path="/models" element={<Models />} />
                 <Route path="/playground" element={<ModelTester />} />
-                <Route path="/about" element={<About />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Routes>
             </Suspense>
@@ -872,13 +558,6 @@ function AppShell() {
         </main>
       </div>
 
-      <UserProfileModal
-        open={showProfileModal}
-        profile={userProfile}
-        onClose={() => setShowProfileModal(false)}
-        onSave={handleSaveProfile}
-        t={t}
-      />
       <SearchModal open={showSearch} onClose={() => setShowSearch(false)} />
     </>
   );

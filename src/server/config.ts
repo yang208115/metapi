@@ -79,7 +79,6 @@ export function buildConfig(env: NodeJS.ProcessEnv) {
     logCleanupCron: env.LOG_CLEANUP_CRON || '0 6 * * *',
     logCleanupConfigured: false,
     logCleanupUsageLogsEnabled: parseBoolean(env.LOG_CLEANUP_USAGE_LOGS_ENABLED, false),
-    logCleanupProgramLogsEnabled: parseBoolean(env.LOG_CLEANUP_PROGRAM_LOGS_ENABLED, false),
     logCleanupRetentionDays: Math.max(1, Math.trunc(parseNumber(env.LOG_CLEANUP_RETENTION_DAYS, 30))),
     webhookUrl: env.WEBHOOK_URL || '',
     barkUrl: env.BARK_URL || '',

@@ -109,11 +109,6 @@ export function applyRuntimeSettings(settingsMap: Map<string, string>) {
     config.logCleanupUsageLogsEnabled = logCleanupUsageLogsEnabled;
   }
 
-  const logCleanupProgramLogsEnabled = parseSettingFromMap<boolean>(settingsMap, 'log_cleanup_program_logs_enabled');
-  if (typeof logCleanupProgramLogsEnabled === 'boolean') {
-    config.logCleanupProgramLogsEnabled = logCleanupProgramLogsEnabled;
-  }
-
   const logCleanupRetentionDays = parseSettingFromMap<number>(settingsMap, 'log_cleanup_retention_days');
   if (typeof logCleanupRetentionDays === 'number' && Number.isFinite(logCleanupRetentionDays) && logCleanupRetentionDays >= 1) {
     config.logCleanupRetentionDays = normalizeLogCleanupRetentionDays(logCleanupRetentionDays);

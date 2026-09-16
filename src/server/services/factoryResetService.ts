@@ -70,12 +70,10 @@ function resetRuntimeConfigToInitialState(preserved: PreservedInfrastructureStat
   }
   config.logCleanupConfigured = false;
   config.logCleanupUsageLogsEnabled = config.proxyLogRetentionDays > 0;
-  config.logCleanupProgramLogsEnabled = false;
   config.logCleanupRetentionDays = Math.max(1, Math.trunc(config.proxyLogRetentionDays || config.logCleanupRetentionDays || 30));
   updateLogCleanupSettings({
     cronExpr: config.logCleanupCron,
     usageLogsEnabled: config.logCleanupUsageLogsEnabled,
-    programLogsEnabled: config.logCleanupProgramLogsEnabled,
     retentionDays: config.logCleanupRetentionDays,
   });
   startProxyLogRetentionService();

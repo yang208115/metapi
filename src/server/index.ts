@@ -14,7 +14,6 @@ import { authRoutes } from './routes/api/auth.js';
 import { settingsRoutes } from './routes/api/settings.js';
 import { accountTokensRoutes } from './routes/api/accountTokens.js';
 import { searchRoutes } from './routes/api/search.js';
-import { eventsRoutes } from './routes/api/events.js';
 import { taskRoutes } from './routes/api/tasks.js';
 import { testRoutes } from './routes/api/test.js';
 import { downstreamApiKeysRoutes } from './routes/api/downstreamApiKeys.js';
@@ -97,7 +96,6 @@ function extractSavedRuntimeDatabaseConfig(settingsMap: Map<string, string>): { 
 const LOG_CLEANUP_SETTING_KEYS = [
   'log_cleanup_cron',
   'log_cleanup_usage_logs_enabled',
-  'log_cleanup_program_logs_enabled',
   'log_cleanup_retention_days',
 ] as const;
 
@@ -155,7 +153,6 @@ try {
   config.logCleanupConfigured = hasExplicitLogCleanupSettings(finalMap);
   if (!config.logCleanupConfigured && config.proxyLogRetentionDays > 0) {
     config.logCleanupUsageLogsEnabled = true;
-    config.logCleanupProgramLogsEnabled = false;
     config.logCleanupRetentionDays = normalizeLogCleanupRetentionDays(config.proxyLogRetentionDays);
   }
   await ensureProxyLogBillingDetailsColumn();
@@ -189,7 +186,6 @@ await app.register(authRoutes);
 await app.register(settingsRoutes);
 await app.register(accountTokensRoutes);
 await app.register(searchRoutes);
-await app.register(eventsRoutes);
 await app.register(taskRoutes);
 await app.register(testRoutes);
 await app.register(downstreamApiKeysRoutes);

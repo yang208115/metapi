@@ -11,28 +11,6 @@ const BACKUP_VERSION = '2.1';
 
 export type BackupExportType = 'all' | 'accounts' | 'preferences';
 
-export interface BackupWebdavConfig {
-  enabled: boolean;
-  fileUrl: string;
-  username: string;
-  password: string;
-  exportType: BackupExportType;
-}
-
-export interface BackupWebdavConfigView {
-  enabled: boolean;
-  fileUrl: string;
-  username: string;
-  exportType: BackupExportType;
-  hasPassword: boolean;
-  passwordMasked: string;
-}
-
-export interface BackupWebdavState {
-  lastSyncAt: string | null;
-  lastError: string | null;
-}
-
 type SiteRow = typeof schema.sites.$inferSelect;
 type SiteApiEndpointRow = typeof schema.siteApiEndpoints.$inferSelect;
 type AccountRow = typeof schema.accounts.$inferSelect;
@@ -235,10 +213,6 @@ const EXCLUDED_SETTING_KEYS = new Set<string>([
   'db_url',
   'db_ssl',
 ]);
-const BACKUP_WEBDAV_CONFIG_SETTING_KEY = 'backup_webdav_config_v1';
-const BACKUP_WEBDAV_STATE_SETTING_KEY = 'backup_webdav_state_v1';
-const BACKUP_WEBDAV_FETCH_TIMEOUT_MS = 15_000;
-
 const DIRECT_API_PLATFORMS = new Set([
   'openai',
   'claude',
@@ -1129,110 +1103,10 @@ function stringifySettingValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function isValidBackupExportType(value: unknown): value is BackupExportType {
-  return value === 'all' || value === 'accounts' || value === 'preferences';
-}
-
 function maskSecret(value: string): string {
   if (!value) return '';
   if (value.length <= 4) return '****';
-  return `${value.slice(0, 2)}****${value.slice(-2)}`;
-}
-
-function isValidHttpUrl(raw: string): boolean {
-  if (!raw.trim()) return false;
-  try {
-    const parsed = new URL(raw);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function normalizeBackupWebdavConfig(raw: unknown): BackupWebdavConfig {
-  const source = isRecord(raw) ? raw : {};
-  const exportType = isValidBackupExportType(source.exportType) ? source.exportType : 'all';
-  return {
-    enabled: source.enabled === true,
-    fileUrl: asString(source.fileUrl),
-    username: asString(source.username),
-    password: typeof source.password === 'string' ? source.password : '',
-    exportType,
-  };
-}
-
-function normalizeBackupWebdavState(raw: unknown): BackupWebdavState {
-  const source = isRecord(raw) ? raw : {};
-  return {
-    lastSyncAt: typeof source.lastSyncAt === 'string' && source.lastSyncAt.trim() ? source.lastSyncAt : null,
-    lastError: typeof source.lastError === 'string' && source.lastError.trim() ? source.lastError : null,
-  };
-}
-
-function toBackupWebdavConfigView(config: BackupWebdavConfig): BackupWebdavConfigView {
-  return {
-    enabled: config.enabled,
-    fileUrl: config.fileUrl,
-    username: config.username,
-    exportType: config.exportType,
-    hasPassword: config.password.length > 0,
-    passwordMasked: maskSecret(config.password),
-  };
-}
-
-async function readSettingValue(key: string): Promise<unknown> {
-  const row = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key)).get();
-  return parseSettingValue(row?.value ?? null);
-}
-
-async function loadBackupWebdavConfig(): Promise<BackupWebdavConfig> {
-  return normalizeBackupWebdavConfig(await readSettingValue(BACKUP_WEBDAV_CONFIG_SETTING_KEY));
-}
-
-async function loadBackupWebdavState(): Promise<BackupWebdavState> {
-  return normalizeBackupWebdavState(await readSettingValue(BACKUP_WEBDAV_STATE_SETTING_KEY));
-}
-
-async function writeBackupWebdavState(next: BackupWebdavState) {
-  await upsertSetting(BACKUP_WEBDAV_STATE_SETTING_KEY, next);
-}
-
-function resolveBackupWebdavAuthHeader(config: BackupWebdavConfig): string | null {
-  if (!config.username && !config.password) return null;
-  return `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`;
-}
-
-function validateBackupWebdavConfig(config: BackupWebdavConfig) {
-  if (config.enabled && !isValidHttpUrl(config.fileUrl)) {
-    throw new Error('WebDAV 文件地址无效，请填写 http/https 文件 URL');
-  }
-  if (!isValidBackupExportType(config.exportType)) {
-    throw new Error('WebDAV 导出类型无效，仅支持 all/accounts/preferences');
-  }
-}
-
-async function fetchBackupWebdav(url: string, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    controller.abort();
-  }, BACKUP_WEBDAV_FETCH_TIMEOUT_MS);
-
-  try {
-    return await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    });
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`WebDAV 请求超时（${Math.max(1, Math.round(BACKUP_WEBDAV_FETCH_TIMEOUT_MS / 1000))}s）`);
-    }
-    throw error;
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-      timeoutHandle = null;
-    }
-  }
+  return value.slice(0, 2) + '****' + value.slice(-2);
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -1244,7 +1118,7 @@ function isSettingValueAcceptable(key: string, value: unknown): boolean {
     return typeof value === 'string' && cron.validate(value);
   }
 
-  if (key === 'log_cleanup_usage_logs_enabled' || key === 'log_cleanup_program_logs_enabled') {
+  if (key === 'log_cleanup_usage_logs_enabled') {
     return typeof value === 'boolean';
   }
 
@@ -1892,139 +1766,4 @@ export async function importBackup(data: RawBackupData): Promise<BackupImportRes
     summary: importMetadata.summary,
     warnings: importMetadata.warnings,
   };
-}
-
-export async function getBackupWebdavConfig() {
-  const [config, state] = await Promise.all([
-    loadBackupWebdavConfig(),
-    loadBackupWebdavState(),
-  ]);
-  return {
-    success: true,
-    config: toBackupWebdavConfigView(config),
-    state,
-  };
-}
-
-export async function saveBackupWebdavConfig(input: Partial<BackupWebdavConfig> & { password?: string; clearPassword?: boolean }) {
-  const existing = await loadBackupWebdavConfig();
-  const next: BackupWebdavConfig = {
-    enabled: input.enabled !== undefined ? input.enabled === true : existing.enabled,
-    fileUrl: input.fileUrl !== undefined ? asString(input.fileUrl) : existing.fileUrl,
-    username: input.username !== undefined ? asString(input.username) : existing.username,
-    password: input.clearPassword
-      ? ''
-      : (input.password !== undefined
-        ? String(input.password)
-        : existing.password),
-    exportType: isValidBackupExportType(input.exportType) ? input.exportType : existing.exportType,
-  };
-
-  validateBackupWebdavConfig(next);
-
-  await upsertSetting(BACKUP_WEBDAV_CONFIG_SETTING_KEY, next);
-  return getBackupWebdavConfig();
-}
-
-export async function exportBackupToWebdav(type?: BackupExportType) {
-  const config = await loadBackupWebdavConfig();
-  validateBackupWebdavConfig(config);
-  if (!config.enabled) {
-    throw new Error('WebDAV 备份未启用');
-  }
-  if (!config.fileUrl) {
-    throw new Error('WebDAV 文件地址不能为空');
-  }
-
-  const exportType = type && isValidBackupExportType(type) ? type : config.exportType;
-  const payload = await exportBackup(exportType);
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  const authHeader = resolveBackupWebdavAuthHeader(config);
-  if (authHeader) headers.Authorization = authHeader;
-
-  try {
-    const response = await fetchBackupWebdav(config.fileUrl, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(payload, null, 2),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`WebDAV 导出失败：HTTP ${response.status}${text ? ` ${text.slice(0, 120)}` : ''}`);
-    }
-
-    const syncedAt = new Date().toISOString();
-    await writeBackupWebdavState({
-      lastSyncAt: syncedAt,
-      lastError: null,
-    });
-    return {
-      success: true,
-      fileUrl: config.fileUrl,
-      exportType,
-      syncedAt,
-      lastSyncAt: syncedAt,
-      lastError: null,
-    };
-  } catch (error: any) {
-    const previousState = await loadBackupWebdavState();
-    await writeBackupWebdavState({
-      lastSyncAt: previousState.lastSyncAt,
-      lastError: error?.message || 'WebDAV 导出失败',
-    });
-    throw error;
-  }
-}
-
-export async function importBackupFromWebdav() {
-  const config = await loadBackupWebdavConfig();
-  validateBackupWebdavConfig(config);
-  if (!config.enabled) {
-    throw new Error('WebDAV 备份未启用');
-  }
-  if (!config.fileUrl) {
-    throw new Error('WebDAV 文件地址不能为空');
-  }
-
-  const headers: Record<string, string> = {};
-  const authHeader = resolveBackupWebdavAuthHeader(config);
-  if (authHeader) headers.Authorization = authHeader;
-
-  try {
-    const response = await fetchBackupWebdav(config.fileUrl, {
-      method: 'GET',
-      headers,
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`WebDAV 导入失败：HTTP ${response.status}${text ? ` ${text.slice(0, 120)}` : ''}`);
-    }
-
-    const raw = await response.text();
-    const parsed = JSON.parse(raw) as RawBackupData;
-    const result = await importBackup(parsed);
-    const syncedAt = new Date().toISOString();
-    await writeBackupWebdavState({
-      lastSyncAt: syncedAt,
-      lastError: null,
-    });
-
-    return {
-      success: true,
-      fileUrl: config.fileUrl,
-      syncedAt,
-      lastSyncAt: syncedAt,
-      lastError: null,
-      ...result,
-    };
-  } catch (error: any) {
-    const previousState = await loadBackupWebdavState();
-    await writeBackupWebdavState({
-      lastSyncAt: previousState.lastSyncAt,
-      lastError: error?.message || 'WebDAV 导入失败',
-    });
-    throw error;
-  }
 }

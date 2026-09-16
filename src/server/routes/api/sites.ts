@@ -4,7 +4,6 @@ import { getInsertedRowId } from '../../db/insertHelpers.js';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { detectSite } from '../../services/siteDetector.js';
 import { invalidateSiteProxyCache, parseSiteProxyUrlInput } from '../../services/siteProxy.js';
-import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { invalidateTokenRouterCache } from '../../services/tokenRouter.js';
 import { parseSiteCustomHeadersInput } from '../../services/siteCustomHeaders.js';
 import { getSub2ApiSubscriptionFromExtraConfig } from '../../services/accountExtraConfig.js';
@@ -372,18 +371,6 @@ export async function sitesRoutes(app: FastifyInstance) {
         .where(eq(schema.accounts.siteId, siteId))
         .run();
 
-      try {
-        const createdAt = formatUtcSqlDateTime(new Date());
-        await db.insert(schema.events).values({
-          type: 'status',
-          title: '站点已禁用',
-          message: `${existingSiteName} 已禁用，关联账号已全部置为禁用`,
-          level: 'warning',
-          relatedId: siteId,
-          relatedType: 'site',
-          createdAt,
-        }).run();
-      } catch { }
       return;
     }
 
@@ -392,18 +379,6 @@ export async function sitesRoutes(app: FastifyInstance) {
       .where(and(eq(schema.accounts.siteId, siteId), eq(schema.accounts.status, 'disabled')))
       .run();
 
-    try {
-      const createdAt = formatUtcSqlDateTime(new Date());
-      await db.insert(schema.events).values({
-        type: 'status',
-        title: '站点已启用',
-        message: `${existingSiteName} 已启用，关联禁用账号已恢复为活跃`,
-        level: 'info',
-        relatedId: siteId,
-        relatedType: 'site',
-        createdAt,
-      }).run();
-    } catch { }
   }
 
   function normalizeBatchIds(input: unknown): number[] {

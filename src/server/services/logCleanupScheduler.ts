@@ -22,7 +22,7 @@ function createLogCleanupTask(cronExpr: string) {
       }
       console.log(
         '[Scheduler] Log cleanup complete: usage=' + result.usageLogsDeleted
-          + ', program=' + result.programLogsDeleted + ', cutoff=' + result.cutoffUtc,
+          + ', cutoff=' + result.cutoffUtc,
       );
     } catch (error) {
       console.error('[Scheduler] Log cleanup error:', error);
@@ -42,7 +42,6 @@ export function startLogCleanupScheduler() {
     '[Scheduler] Log cleanup cron: ' + cronExpr
       + ' (configured=' + config.logCleanupConfigured
       + ', usage=' + config.logCleanupUsageLogsEnabled
-      + ', program=' + config.logCleanupProgramLogsEnabled
       + ', retentionDays=' + normalizeLogCleanupRetentionDays(config.logCleanupRetentionDays) + ')',
   );
 }
@@ -50,7 +49,6 @@ export function startLogCleanupScheduler() {
 export function updateLogCleanupSettings(input: {
   cronExpr?: string;
   usageLogsEnabled?: boolean;
-  programLogsEnabled?: boolean;
   retentionDays?: number;
 }) {
   const cronExpr = input.cronExpr ?? config.logCleanupCron;
@@ -58,7 +56,6 @@ export function updateLogCleanupSettings(input: {
 
   config.logCleanupCron = cronExpr;
   if (input.usageLogsEnabled !== undefined) config.logCleanupUsageLogsEnabled = !!input.usageLogsEnabled;
-  if (input.programLogsEnabled !== undefined) config.logCleanupProgramLogsEnabled = !!input.programLogsEnabled;
   config.logCleanupRetentionDays = normalizeLogCleanupRetentionDays(
     input.retentionDays ?? config.logCleanupRetentionDays,
   );

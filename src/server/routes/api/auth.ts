@@ -2,7 +2,6 @@ import { FastifyInstance } from 'fastify';
 import { db, schema } from '../../db/index.js';
 import { config } from '../../config.js';
 import { eq } from 'drizzle-orm';
-import { formatUtcSqlDateTime } from '../../services/localTimeService.js';
 import { createRateLimitGuard } from '../../middleware/requestRateLimit.js';
 import { parseAuthChangePayload } from '../../contracts/supportRoutePayloads.js';
 
@@ -47,18 +46,6 @@ export async function authRoutes(app: FastifyInstance) {
 
     // Update runtime config
     config.authToken = newToken;
-
-    try {
-      const createdAt = formatUtcSqlDateTime(new Date());
-      await db.insert(schema.events).values({
-        type: 'token',
-        title: '管理员登录令牌已更新',
-        message: '管理员登录 Token 已被修改，请使用新 Token 登录。',
-        level: 'warning',
-        relatedType: 'settings',
-        createdAt,
-      }).run();
-    } catch {}
 
     return { success: true, message: 'Token 已更新' };
     },

@@ -367,30 +367,6 @@ async function executeAccountTokenSync(row: AccountWithSiteRow): Promise<SyncExe
   }
 }
 
-async function appendTokenSyncEvent(result: SyncExecutionResult) {
-  const title = result.status === 'synced'
-    ? '令牌同步成功'
-    : (result.status === 'skipped' ? '令牌同步跳过' : '令牌同步失败');
-  const level = result.status === 'synced'
-    ? 'info'
-    : (result.status === 'skipped' ? 'warning' : 'error');
-  const detail = result.status === 'synced'
-    ? `新增 ${result.created}，更新 ${result.updated}，待补全 ${result.maskedPending || 0}，总数 ${result.total}`
-    : (result.message || result.reason || 'sync skipped');
-
-  try {
-    await db.insert(schema.events).values({
-      type: 'token',
-      title,
-      message: `${result.accountName} @ ${result.siteName}: ${detail}`,
-      level,
-      relatedId: result.accountId,
-      relatedType: 'account',
-      createdAt: new Date().toISOString(),
-    }).run();
-  } catch {}
-}
-
 async function executeSyncAllAccountTokens() {
   const rows = await db.select().from(schema.accounts)
     .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
@@ -403,7 +379,6 @@ async function executeSyncAllAccountTokens() {
     const batchResults = await Promise.all(
       batch.map(async (row) => {
         const result = await executeAccountTokenSync(row);
-        appendTokenSyncEvent(result);
         return result;
       }),
     );
@@ -615,7 +590,6 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     }
 
     const syncResult = await executeAccountTokenSync(row);
-    appendTokenSyncEvent(syncResult);
 
     if (syncResult.status === 'failed') {
       return reply.code(502).send({ success: false, message: syncResult.message || '同步站点令牌失败' });
@@ -983,7 +957,6 @@ export async function accountTokensRoutes(app: FastifyInstance) {
     }
 
     const result = await executeAccountTokenSync(row);
-    appendTokenSyncEvent(result);
     if (result.status === 'skipped' && result.reason === 'apikey_connection') {
       return reply.code(400).send({ success: false, message: 'API Key 连接不支持同步账号令牌' });
     }

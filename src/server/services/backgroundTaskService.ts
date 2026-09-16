@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { db, schema } from '../db/index.js';
 import { sendNotification } from './notifyService.js';
 
 export type BackgroundTaskStatus = 'pending' | 'running' | 'succeeded' | 'failed';
@@ -153,20 +152,6 @@ export function subscribeToBackgroundTaskLogs(
   };
 }
 
-async function appendTaskEvent(level: 'info' | 'warning' | 'error', title: string, message: string, taskId: string) {
-  try {
-    await db.insert(schema.events).values({
-      type: 'status',
-      title,
-      message,
-      level,
-      relatedType: 'task',
-      createdAt: nowIso(),
-    }).run();
-  } catch {}
-  void taskId;
-}
-
 async function runTask(taskId: string, options: BackgroundTaskStartOptions, runner: () => Promise<unknown>) {
   const initialTask = tasks.get(taskId);
   if (!initialTask) return;
@@ -189,7 +174,6 @@ async function runTask(taskId: string, options: BackgroundTaskStartOptions, runn
     const eventTitle = resolveTaskMessage(options.successTitle, task, `${task.title} 已完成`);
     const eventMessage = resolveTaskMessage(options.successMessage, task, `${task.title} 已完成`);
     task = setTaskStatus(task, { message: eventMessage });
-    appendTaskEvent('info', eventTitle, eventMessage, task.id);
 
     if (options.notifyOnSuccess) {
       await sendNotification(eventTitle, eventMessage, 'info');
@@ -206,7 +190,6 @@ async function runTask(taskId: string, options: BackgroundTaskStartOptions, runn
     const eventTitle = resolveTaskMessage(options.failureTitle, task, `${task.title} 失败`);
     const eventMessage = resolveTaskMessage(options.failureMessage, task, task.message);
     task = setTaskStatus(task, { message: eventMessage });
-    appendTaskEvent('error', eventTitle, eventMessage, task.id);
 
     if (options.notifyOnFailure ?? true) {
       await sendNotification(eventTitle, eventMessage, 'error');
@@ -276,7 +259,6 @@ export function startBackgroundTask(
   taskLogSeq.set(task.id, 0);
   if (dedupeKey) dedupeTaskIds.set(dedupeKey, task.id);
 
-  appendTaskEvent('info', `${task.title}已开始`, `${task.title} 已开始执行`, task.id);
   void runTask(task.id, options, runner);
   return { task, reused: false };
 }
