@@ -1,0 +1,9 @@
+# docker-compose.override.yml
+# This file is automatically picked up by Docker Compose during local development.
+# It overrides the image reference in docker-compose.yml with a local build.
+services:
+  metapi:
+    image: ~
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile

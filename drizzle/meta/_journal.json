@@ -1,0 +1,202 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1771906082166,
+      "tag": "0000_sloppy_blackheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1771966800000,
+      "tag": "0001_token_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1771969800000,
+      "tag": "0002_token_model_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1772079351462,
+      "tag": "0003_great_blizzard",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1772320800000,
+      "tag": "0004_sorting_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1773500331000,
+      "tag": "0006_site_disabled_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1773500400000,
+      "tag": "0007_account_token_group",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1773500500000,
+      "tag": "0008_sqlite_schema_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1773528832339,
+      "tag": "0009_model_availability_is_manual",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1773553945763,
+      "tag": "0010_proxy_logs_downstream_api_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1773605400000,
+      "tag": "0011_downstream_api_key_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1773665311013,
+      "tag": "0012_account_token_value_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1773682200000,
+      "tag": "0013_oauth_multi_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1773855000000,
+      "tag": "0014_explicit_group_routes",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1773900000000,
+      "tag": "0015_site_announcements",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1773979652606,
+      "tag": "0016_proxy_logs_client_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1774692431588,
+      "tag": "0017_proxy_debug_traces",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1774959227309,
+      "tag": "0018_site_api_endpoints",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1775058998448,
+      "tag": "0019_proxy_logs_stream_timing",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1775397600000,
+      "tag": "0020_downstream_api_key_exclusions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1775441167045,
+      "tag": "0021_young_shriek",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1775713163948,
+      "tag": "0022_admin_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1775721864379,
+      "tag": "0023_usage_aggregates",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1775731596826,
+      "tag": "0024_projection_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1776943800000,
+      "tag": "0025_site_post_refresh_probe",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1776944000000,
+      "tag": "0026_site_probe_latency_threshold",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1776944200000,
+      "tag": "0027_site_custom_headers_override_request_headers",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1785715200000,
+      "tag": "0027_site_max_concurrency",
+      "breakpoints": true
+    }
+  ]
+}

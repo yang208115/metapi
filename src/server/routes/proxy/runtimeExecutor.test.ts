@@ -1,0 +1,388 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetch } from 'undici';
+import type { BuiltEndpointRequest } from './endpointFlow.js';
+
+vi.mock('undici', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('undici')>();
+  return {
+    ...actual,
+    fetch: vi.fn(),
+  };
+});
+
+const fetchMock = vi.mocked(fetch);
+
+describe('dispatchRuntimeRequest', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+  });
+
+  it('routes standard antigravity runtime requests through daily then sandbox base urls and rewrites the payload fingerprint', async () => {
+    const { dispatchRuntimeRequest } = await import('./runtimeExecutor.js');
+    const request: BuiltEndpointRequest = {
+      endpoint: 'chat',
+      path: '/v1internal:generateContent',
+      headers: {
+        Authorization: 'Bearer antigravity-token',
+        'Content-Type': 'application/json',
+        'User-Agent': 'google-api-nodejs-client/9.15.1',
+      },
+      body: {
+        project: 'project-demo',
+        model: 'gemini-2.5-pro',
+        request: {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: 'hello runtime executor' }],
+            },
+          ],
+        },
+      },
+      runtime: {
+        executor: 'antigravity',
+        modelName: 'gemini-2.5-pro',
+        stream: false,
+      },
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: { message: 'try fallback base url' },
+      }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      }) as unknown as Awaited<ReturnType<typeof fetch>>)
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        response: { responseId: 'ok' },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }) as unknown as Awaited<ReturnType<typeof fetch>>);
+
+    const response = await dispatchRuntimeRequest({
+      siteUrl: 'https://cloudcode-pa.googleapis.com',
+      request,
+      buildInit: (_url, nextRequest) => ({
+        method: 'POST',
+        headers: nextRequest.headers,
+        body: JSON.stringify(nextRequest.body),
+      }),
+    });
+
+    expect(response.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent');
+
+    const firstInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(firstInit.headers).toMatchObject({
+      Authorization: 'Bearer antigravity-token',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'antigravity/1.19.6 darwin/arm64',
+    });
+
+    const upstreamBody = JSON.parse(String(firstInit.body));
+    expect(upstreamBody).toMatchObject({
+      project: 'project-demo',
+      model: 'gemini-2.5-pro',
+      userAgent: 'antigravity',
+      requestType: 'agent',
+      request: {
+        sessionId: expect.any(String),
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: 'hello runtime executor' }],
+          },
+        ],
+      },
+    });
+    expect(upstreamBody.requestId).toMatch(/^agent-[0-9a-f-]{36}$/i);
+  });
+
+  it('routes antigravity gemini-3-pro non-stream requests through the stream endpoint and aggregates SSE back to JSON', async () => {
+    const { dispatchRuntimeRequest } = await import('./runtimeExecutor.js');
+    const request: BuiltEndpointRequest = {
+      endpoint: 'chat',
+      path: '/v1internal:streamGenerateContent?alt=sse',
+      headers: {
+        Authorization: 'Bearer antigravity-token',
+        'Content-Type': 'application/json',
+      },
+      body: {
+        project: 'project-demo',
+        model: 'gemini-3-pro-low',
+        request: {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: 'hello runtime executor' }],
+            },
+          ],
+        },
+      },
+      runtime: {
+        executor: 'antigravity',
+        modelName: 'gemini-3-pro-low',
+        stream: false,
+        action: 'streamGenerateContent',
+      },
+    };
+
+    fetchMock.mockResolvedValueOnce(new Response([
+      'data: {"response":{"responseId":"antigravity-stream-1","modelVersion":"gemini-3-pro-low","candidates":[{"content":{"role":"model","parts":[{"text":"hello "}]},"index":0}]}}',
+      '',
+      'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"from antigravity"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":4,"totalTokenCount":9}}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n'), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }) as unknown as Awaited<ReturnType<typeof fetch>>);
+
+    const response = await dispatchRuntimeRequest({
+      siteUrl: 'https://cloudcode-pa.googleapis.com',
+      request,
+      buildInit: (_url, nextRequest) => ({
+        method: 'POST',
+        headers: nextRequest.headers,
+        body: JSON.stringify(nextRequest.body),
+      }),
+    });
+
+    expect(response.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse');
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(requestInit.headers).toMatchObject({
+      Authorization: 'Bearer antigravity-token',
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      'User-Agent': 'antigravity/1.19.6 darwin/arm64',
+    });
+
+    const upstreamBody = JSON.parse(String(requestInit.body));
+    expect(upstreamBody).toMatchObject({
+      project: 'project-demo',
+      model: 'gemini-3-pro-low',
+      userAgent: 'antigravity',
+      requestType: 'agent',
+    });
+
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toEqual({
+      responseId: 'antigravity-stream-1',
+      modelVersion: 'gemini-3-pro-low',
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [{ text: 'hello from antigravity' }],
+          },
+          finishReason: 'STOP',
+        },
+      ],
+      usageMetadata: {
+        promptTokenCount: 5,
+        candidatesTokenCount: 4,
+        totalTokenCount: 9,
+      },
+    });
+  });
+
+  it('aggregates an unterminated trailing SSE event for antigravity non-stream stream-endpoint requests', async () => {
+    const { dispatchRuntimeRequest } = await import('./runtimeExecutor.js');
+    const request: BuiltEndpointRequest = {
+      endpoint: 'chat',
+      path: '/v1internal:streamGenerateContent?alt=sse',
+      headers: {
+        Authorization: 'Bearer antigravity-token',
+        'Content-Type': 'application/json',
+      },
+      body: {
+        project: 'project-demo',
+        model: 'gemini-3-pro-low',
+        request: {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: 'hello runtime executor' }],
+            },
+          ],
+        },
+      },
+      runtime: {
+        executor: 'antigravity',
+        modelName: 'gemini-3-pro-low',
+        stream: false,
+        action: 'streamGenerateContent',
+      },
+    };
+
+    fetchMock.mockResolvedValueOnce(new Response([
+      'data: {"response":{"responseId":"antigravity-stream-tail","modelVersion":"gemini-3-pro-low","candidates":[{"content":{"role":"model","parts":[{"text":"hello "}]},"index":0}]}}',
+      '',
+      'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"tail"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":5,"totalTokenCount":12}}}',
+    ].join('\n'), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+    }) as unknown as Awaited<ReturnType<typeof fetch>>);
+
+    const response = await dispatchRuntimeRequest({
+      siteUrl: 'https://cloudcode-pa.googleapis.com',
+      request,
+      buildInit: (_url, nextRequest) => ({
+        method: 'POST',
+        headers: nextRequest.headers,
+        body: JSON.stringify(nextRequest.body),
+      }),
+    });
+
+    expect(response.ok).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      responseId: 'antigravity-stream-tail',
+      modelVersion: 'gemini-3-pro-low',
+      candidates: [
+        {
+          index: 0,
+          content: {
+            role: 'model',
+            parts: [{ text: 'hello tail' }],
+          },
+          finishReason: 'STOP',
+        },
+      ],
+      usageMetadata: {
+        promptTokenCount: 7,
+        candidatesTokenCount: 5,
+        totalTokenCount: 12,
+      },
+    });
+  });
+
+  it('keeps gemini-cli countTokens payload lean while forcing a model-aware user agent', async () => {
+    const { dispatchRuntimeRequest } = await import('./runtimeExecutor.js');
+    const request: BuiltEndpointRequest = {
+      endpoint: 'chat',
+      path: '/v1internal:countTokens',
+      headers: {
+        Authorization: 'Bearer gemini-cli-token',
+        'Content-Type': 'application/json',
+        'User-Agent': 'GeminiCLI/0.31.0/unknown (win32; x64)',
+        'X-Goog-Api-Client': 'google-genai-sdk/1.41.0 gl-node/v22.19.0',
+      },
+      body: {
+        project: 'project-demo',
+        model: 'gemini-2.5-pro',
+        request: {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: 'count these tokens' }],
+            },
+          ],
+        },
+      },
+      runtime: {
+        executor: 'gemini-cli',
+        modelName: 'gemini-2.5-pro',
+        stream: false,
+        action: 'countTokens',
+      },
+    };
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      totalTokens: 12,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }) as unknown as Awaited<ReturnType<typeof fetch>>);
+
+    const response = await dispatchRuntimeRequest({
+      siteUrl: 'https://cloudcode-pa.googleapis.com',
+      request,
+      buildInit: (_url, nextRequest) => ({
+        method: 'POST',
+        headers: nextRequest.headers,
+        body: JSON.stringify(nextRequest.body),
+      }),
+    });
+
+    expect(response.ok).toBe(true);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(requestInit.headers).toMatchObject({
+      Authorization: 'Bearer gemini-cli-token',
+      'Content-Type': 'application/json',
+      'User-Agent': 'GeminiCLI/0.31.0/gemini-2.5-pro (win32; x64)',
+      'X-Goog-Api-Client': 'google-genai-sdk/1.41.0 gl-node/v22.19.0',
+    });
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      request: {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: 'count these tokens' }],
+          },
+        ],
+      },
+    });
+  });
+
+  it('retries antigravity runtime requests on transport errors before falling back to the next base url', async () => {
+    const { dispatchRuntimeRequest } = await import('./runtimeExecutor.js');
+    const request: BuiltEndpointRequest = {
+      endpoint: 'chat',
+      path: '/v1internal:generateContent',
+      headers: {
+        Authorization: 'Bearer antigravity-token',
+        'Content-Type': 'application/json',
+      },
+      body: {
+        project: 'project-demo',
+        model: 'gemini-2.5-pro',
+        request: {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: 'hello runtime executor' }],
+            },
+          ],
+        },
+      },
+      runtime: {
+        executor: 'antigravity',
+        modelName: 'gemini-2.5-pro',
+        stream: false,
+      },
+    };
+
+    fetchMock
+      .mockRejectedValueOnce(new Error('socket hang up'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        response: { responseId: 'ok' },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }) as unknown as Awaited<ReturnType<typeof fetch>>);
+
+    const response = await dispatchRuntimeRequest({
+      siteUrl: 'https://cloudcode-pa.googleapis.com',
+      request,
+      buildInit: (_url, nextRequest) => ({
+        method: 'POST',
+        headers: nextRequest.headers,
+        body: JSON.stringify(nextRequest.body),
+      }),
+    });
+
+    expect(response.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent');
+  });
+});

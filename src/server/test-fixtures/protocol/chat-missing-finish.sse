@@ -1,0 +1,3 @@
+data: {"id":"chatcmpl-eof","model":"upstream-gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-eof","model":"upstream-gpt","choices":[{"delta":{"content":"tail before eof"},"finish_reason":null}]}

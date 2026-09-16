@@ -1,0 +1,9 @@
+data: {"id":"chatcmpl-think","model":"upstream-gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-think","model":"upstream-gpt","choices":[{"delta":{"content":"<think>plan quietly</think>"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-think","model":"upstream-gpt","choices":[{"delta":{"content":"visible answer"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-think","model":"upstream-gpt","choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]

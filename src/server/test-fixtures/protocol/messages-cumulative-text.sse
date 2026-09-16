@@ -1,0 +1,16 @@
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup_1","model":"upstream-gpt"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"I'm Claude, an AI assistant made by Anthropic."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"I'm Claude, an AI assistant made by Anthropic."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"I'm Claude, an AI assistant made by Anthropic."}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+data: [DONE]

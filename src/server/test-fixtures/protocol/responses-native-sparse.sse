@@ -1,0 +1,13 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_sparse_1","model":"upstream-gpt","created_at":1706000000,"status":"in_progress","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_0","type":"message","role":"assistant","status":"in_progress","content":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"item_id":"msg_0","delta":"hello world"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_sparse_1","model":"upstream-gpt","status":"completed","usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6}}}
+
+data: [DONE]

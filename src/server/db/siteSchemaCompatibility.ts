@@ -1,0 +1,208 @@
+export type SiteSchemaDialect = 'sqlite' | 'mysql' | 'postgres';
+
+export interface SiteSchemaInspector {
+  dialect: SiteSchemaDialect;
+  tableExists(table: string): Promise<boolean>;
+  columnExists(table: string, column: string): Promise<boolean>;
+  execute(sqlText: string): Promise<void>;
+}
+
+export type SiteColumnCompatibilitySpec = {
+  column: string;
+  addSql: Record<SiteSchemaDialect, string>;
+  normalizeSql?: Record<SiteSchemaDialect, string>;
+};
+
+export type SiteTableCompatibilitySpec = {
+  table: string;
+  createSql: Record<SiteSchemaDialect, string>;
+  postCreateSql?: Record<SiteSchemaDialect, string[]>;
+};
+
+export const SITE_COLUMN_COMPATIBILITY_SPECS: SiteColumnCompatibilitySpec[] = [
+  {
+    column: 'proxy_url',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN proxy_url text;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `proxy_url` TEXT NULL',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "proxy_url" TEXT',
+    },
+  },
+  {
+    column: 'use_system_proxy',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN use_system_proxy integer DEFAULT 0;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `use_system_proxy` BOOLEAN DEFAULT FALSE',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "use_system_proxy" BOOLEAN DEFAULT FALSE',
+    },
+    normalizeSql: {
+      sqlite: 'UPDATE sites SET use_system_proxy = 0 WHERE use_system_proxy IS NULL;',
+      mysql: 'UPDATE `sites` SET `use_system_proxy` = FALSE WHERE `use_system_proxy` IS NULL',
+      postgres: 'UPDATE "sites" SET "use_system_proxy" = FALSE WHERE "use_system_proxy" IS NULL',
+    },
+  },
+  {
+    column: 'custom_headers',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN custom_headers text;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `custom_headers` TEXT NULL',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "custom_headers" TEXT',
+    },
+  },
+  {
+    column: 'custom_headers_override_request_headers',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN custom_headers_override_request_headers integer DEFAULT 0;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `custom_headers_override_request_headers` BOOLEAN DEFAULT FALSE',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "custom_headers_override_request_headers" BOOLEAN DEFAULT FALSE',
+    },
+    normalizeSql: {
+      sqlite: 'UPDATE sites SET custom_headers_override_request_headers = 0 WHERE custom_headers_override_request_headers IS NULL;',
+      mysql: 'UPDATE `sites` SET `custom_headers_override_request_headers` = FALSE WHERE `custom_headers_override_request_headers` IS NULL',
+      postgres: 'UPDATE "sites" SET "custom_headers_override_request_headers" = FALSE WHERE "custom_headers_override_request_headers" IS NULL',
+    },
+  },
+  {
+    column: 'external_checkin_url',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN external_checkin_url text;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `external_checkin_url` TEXT NULL',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "external_checkin_url" TEXT',
+    },
+  },
+  {
+    column: 'global_weight',
+    addSql: {
+      sqlite: 'ALTER TABLE sites ADD COLUMN global_weight real DEFAULT 1;',
+      mysql: 'ALTER TABLE `sites` ADD COLUMN `global_weight` DOUBLE DEFAULT 1',
+      postgres: 'ALTER TABLE "sites" ADD COLUMN "global_weight" DOUBLE PRECISION DEFAULT 1',
+    },
+    normalizeSql: {
+      sqlite: 'UPDATE sites SET global_weight = 1 WHERE global_weight IS NULL OR global_weight <= 0;',
+      mysql: 'UPDATE `sites` SET `global_weight` = 1 WHERE `global_weight` IS NULL OR `global_weight` <= 0',
+      postgres: 'UPDATE "sites" SET "global_weight" = 1 WHERE "global_weight" IS NULL OR "global_weight" <= 0',
+    },
+  },
+];
+
+export const SITE_TABLE_COMPATIBILITY_SPECS: SiteTableCompatibilitySpec[] = [
+  {
+    table: 'site_api_endpoints',
+    createSql: {
+      sqlite: 'CREATE TABLE IF NOT EXISTS site_api_endpoints (id integer PRIMARY KEY AUTOINCREMENT NOT NULL, site_id integer NOT NULL REFERENCES sites(id) ON DELETE cascade, url text NOT NULL, enabled integer DEFAULT 1, sort_order integer DEFAULT 0, cooldown_until text, last_selected_at text, last_failed_at text, last_failure_reason text, created_at text DEFAULT (datetime(\'now\')), updated_at text DEFAULT (datetime(\'now\')));',
+      mysql: 'CREATE TABLE IF NOT EXISTS `site_api_endpoints` (`id` INT AUTO_INCREMENT PRIMARY KEY, `site_id` INT NOT NULL, `url` TEXT NOT NULL, `enabled` BOOLEAN DEFAULT TRUE, `sort_order` INT DEFAULT 0, `cooldown_until` VARCHAR(191) NULL, `last_selected_at` VARCHAR(191) NULL, `last_failed_at` VARCHAR(191) NULL, `last_failure_reason` TEXT NULL, `created_at` VARCHAR(191) DEFAULT (DATE_FORMAT(NOW(), \'%Y-%m-%d %H:%i:%s\')), `updated_at` VARCHAR(191) DEFAULT (DATE_FORMAT(NOW(), \'%Y-%m-%d %H:%i:%s\')), CONSTRAINT `site_api_endpoints_site_fk` FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON DELETE CASCADE)',
+      postgres: 'CREATE TABLE IF NOT EXISTS "site_api_endpoints" ("id" INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, "site_id" INTEGER NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE, "url" TEXT NOT NULL, "enabled" BOOLEAN DEFAULT TRUE, "sort_order" INTEGER DEFAULT 0, "cooldown_until" TEXT, "last_selected_at" TEXT, "last_failed_at" TEXT, "last_failure_reason" TEXT, "created_at" TEXT DEFAULT to_char(timezone(\'UTC\', CURRENT_TIMESTAMP), \'YYYY-MM-DD HH24:MI:SS\'), "updated_at" TEXT DEFAULT to_char(timezone(\'UTC\', CURRENT_TIMESTAMP), \'YYYY-MM-DD HH24:MI:SS\'))',
+    },
+    postCreateSql: {
+      sqlite: [
+        'CREATE UNIQUE INDEX IF NOT EXISTS site_api_endpoints_site_url_unique ON site_api_endpoints (site_id, url);',
+        'CREATE INDEX IF NOT EXISTS site_api_endpoints_site_enabled_sort_idx ON site_api_endpoints (site_id, enabled, sort_order);',
+        'CREATE INDEX IF NOT EXISTS site_api_endpoints_site_cooldown_idx ON site_api_endpoints (site_id, cooldown_until);',
+      ],
+      mysql: [
+        'CREATE UNIQUE INDEX `site_api_endpoints_site_url_unique` ON `site_api_endpoints` (`site_id`, `url`(191))',
+        'CREATE INDEX `site_api_endpoints_site_enabled_sort_idx` ON `site_api_endpoints` (`site_id`, `enabled`, `sort_order`)',
+        'CREATE INDEX `site_api_endpoints_site_cooldown_idx` ON `site_api_endpoints` (`site_id`, `cooldown_until`(191))',
+      ],
+      postgres: [
+        'CREATE UNIQUE INDEX IF NOT EXISTS "site_api_endpoints_site_url_unique" ON "site_api_endpoints" ("site_id", "url")',
+        'CREATE INDEX IF NOT EXISTS "site_api_endpoints_site_enabled_sort_idx" ON "site_api_endpoints" ("site_id", "enabled", "sort_order")',
+        'CREATE INDEX IF NOT EXISTS "site_api_endpoints_site_cooldown_idx" ON "site_api_endpoints" ("site_id", "cooldown_until")',
+      ],
+    },
+  },
+  {
+    table: 'site_disabled_models',
+    createSql: {
+      sqlite: 'CREATE TABLE IF NOT EXISTS site_disabled_models (id integer PRIMARY KEY AUTOINCREMENT NOT NULL, site_id integer NOT NULL REFERENCES sites(id) ON DELETE cascade, model_name text NOT NULL, created_at text DEFAULT (datetime(\'now\')));',
+      mysql: 'CREATE TABLE IF NOT EXISTS `site_disabled_models` (`id` INT AUTO_INCREMENT PRIMARY KEY, `site_id` INT NOT NULL, `model_name` VARCHAR(191) NOT NULL, `created_at` TEXT NULL, CONSTRAINT `site_disabled_models_site_fk` FOREIGN KEY (`site_id`) REFERENCES `sites`(`id`) ON DELETE CASCADE)',
+      postgres: 'CREATE TABLE IF NOT EXISTS "site_disabled_models" ("id" INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, "site_id" INTEGER NOT NULL REFERENCES "sites"("id") ON DELETE CASCADE, "model_name" TEXT NOT NULL, "created_at" TEXT)',
+    },
+    postCreateSql: {
+      sqlite: [
+        'CREATE UNIQUE INDEX IF NOT EXISTS site_disabled_models_site_model_unique ON site_disabled_models (site_id, model_name);',
+        'CREATE INDEX IF NOT EXISTS site_disabled_models_site_id_idx ON site_disabled_models (site_id);',
+      ],
+      mysql: [
+        'CREATE UNIQUE INDEX `site_disabled_models_site_model_unique` ON `site_disabled_models` (`site_id`, `model_name`(191))',
+        'CREATE INDEX `site_disabled_models_site_id_idx` ON `site_disabled_models` (`site_id`)',
+      ],
+      postgres: [
+        'CREATE UNIQUE INDEX IF NOT EXISTS "site_disabled_models_site_model_unique" ON "site_disabled_models" ("site_id", "model_name")',
+        'CREATE INDEX IF NOT EXISTS "site_disabled_models_site_id_idx" ON "site_disabled_models" ("site_id")',
+      ],
+    },
+  },
+];
+
+function normalizeSchemaErrorMessage(error: unknown): string {
+  if (typeof error === 'object' && error && 'message' in error) {
+    return String((error as { message?: unknown }).message || '');
+  }
+  return String(error || '');
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+  const lowered = normalizeSchemaErrorMessage(error).toLowerCase();
+  return lowered.includes('duplicate column')
+    || lowered.includes('already exists')
+    || lowered.includes('duplicate column name');
+}
+
+function isExistingSchemaObjectError(error: unknown): boolean {
+  const lowered = normalizeSchemaErrorMessage(error).toLowerCase();
+  return lowered.includes('duplicate column')
+    || lowered.includes('already exists')
+    || lowered.includes('duplicate column name')
+    || lowered.includes('duplicate key name')
+    || (lowered.includes('relation') && lowered.includes('already exists'));
+}
+
+async function executeAddColumn(inspector: SiteSchemaInspector, sqlText: string): Promise<void> {
+  try {
+    await inspector.execute(sqlText);
+  } catch (error) {
+    if (!isDuplicateColumnError(error)) {
+      throw error;
+    }
+  }
+}
+
+async function executeCreateSchemaObject(inspector: SiteSchemaInspector, sqlText: string): Promise<void> {
+  try {
+    await inspector.execute(sqlText);
+  } catch (error) {
+    if (!isExistingSchemaObjectError(error)) {
+      throw error;
+    }
+  }
+}
+
+export async function ensureSiteSchemaCompatibility(inspector: SiteSchemaInspector): Promise<void> {
+  const hasSitesTable = await inspector.tableExists('sites');
+  if (!hasSitesTable) {
+    return;
+  }
+
+  for (const spec of SITE_COLUMN_COMPATIBILITY_SPECS) {
+    const hasColumn = await inspector.columnExists('sites', spec.column);
+    if (!hasColumn) {
+      await executeAddColumn(inspector, spec.addSql[inspector.dialect]);
+    }
+
+    if (spec.normalizeSql) {
+      await inspector.execute(spec.normalizeSql[inspector.dialect]);
+    }
+  }
+
+  for (const spec of SITE_TABLE_COMPATIBILITY_SPECS) {
+    const hasTable = await inspector.tableExists(spec.table);
+    if (!hasTable) {
+      await executeCreateSchemaObject(inspector, spec.createSql[inspector.dialect]);
+    }
+
+    for (const sqlText of spec.postCreateSql?.[inspector.dialect] ?? []) {
+      await executeCreateSchemaObject(inspector, sqlText);
+    }
+  }
+}

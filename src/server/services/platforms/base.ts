@@ -1,0 +1,258 @@
+import { createHash } from 'node:crypto';
+import type { RequestInit as UndiciRequestInit } from 'undici';
+import { withSiteProxyRequestInit } from '../siteProxy.js';
+
+export interface SubscriptionPlanSummary {
+  id?: number;
+  groupId?: number;
+  groupName?: string;
+  status?: string;
+  expiresAt?: string;
+  dailyUsedUsd?: number;
+  dailyLimitUsd?: number;
+  weeklyUsedUsd?: number;
+  weeklyLimitUsd?: number;
+  monthlyUsedUsd?: number;
+  monthlyLimitUsd?: number;
+}
+
+export interface SubscriptionSummary {
+  activeCount: number;
+  totalUsedUsd: number;
+  subscriptions: SubscriptionPlanSummary[];
+}
+
+export interface BalanceInfo {
+  balance: number;
+  used: number;
+  quota: number;
+  todayIncome?: number;
+  todayQuotaConsumption?: number;
+  subscriptionSummary?: SubscriptionSummary;
+}
+
+export interface LoginResult {
+  success: boolean;
+  accessToken?: string;
+  username?: string;
+  message?: string;
+  /**
+   * Site-side user id (the value of the `New-Api-User` header).
+   * Most New API compatible sites return it in the login payload as
+   * `data.id`, so adapters can surface it here instead of forcing callers
+   * to guess it from the username or re-discover it on every request.
+   */
+  platformUserId?: number;
+}
+
+export interface UserInfo {
+  username: string;
+  displayName?: string;
+  email?: string;
+  role?: number;
+}
+
+export interface TokenVerifyResult {
+  tokenType: 'session' | 'apikey' | 'unknown';
+  userInfo?: UserInfo | null;
+  balance?: BalanceInfo | null;
+  apiToken?: string | null;
+  models?: string[];
+}
+
+export interface ApiTokenInfo {
+  name: string;
+  key: string;
+  enabled?: boolean;
+  tokenGroup?: string | null;
+}
+
+export interface CreateApiTokenOptions {
+  name?: string;
+  group?: string;
+  unlimitedQuota?: boolean;
+  remainQuota?: number;
+  expiredTime?: number;
+  allowIps?: string;
+  modelLimitsEnabled?: boolean;
+  modelLimits?: string;
+}
+
+export interface PlatformAdapter {
+  readonly platformName: string;
+  detect(url: string): Promise<boolean>;
+  login(baseUrl: string, username: string, password: string): Promise<LoginResult>;
+  getUserInfo(baseUrl: string, accessToken: string, platformUserId?: number): Promise<UserInfo | null>;
+  verifyToken(baseUrl: string, token: string, platformUserId?: number): Promise<TokenVerifyResult>;
+  getBalance(baseUrl: string, accessToken: string, platformUserId?: number): Promise<BalanceInfo>;
+  getModels(baseUrl: string, token: string, platformUserId?: number, contextSourceScope?: string): Promise<string[]>;
+  getApiToken(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string | null>;
+  getApiTokens(baseUrl: string, accessToken: string, platformUserId?: number): Promise<ApiTokenInfo[]>;
+  getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]>;
+  createApiToken(baseUrl: string, accessToken: string, platformUserId?: number, options?: CreateApiTokenOptions): Promise<boolean>;
+  deleteApiToken(baseUrl: string, accessToken: string, tokenKey: string, platformUserId?: number): Promise<boolean>;
+}
+
+export abstract class BasePlatformAdapter implements PlatformAdapter {
+  abstract readonly platformName: string;
+
+  abstract detect(url: string): Promise<boolean>;
+  abstract getBalance(baseUrl: string, accessToken: string): Promise<BalanceInfo>;
+  abstract getModels(baseUrl: string, token: string, platformUserId?: number, contextSourceScope?: string): Promise<string[]>;
+
+  async verifyToken(baseUrl: string, token: string, _platformUserId?: number): Promise<TokenVerifyResult> {
+    // 1. Try as session/access token first (for management APIs)
+    const userInfo = await this.getUserInfo(baseUrl, token);
+    if (userInfo) {
+      let balance: BalanceInfo | null = null;
+      try { balance = await this.getBalance(baseUrl, token); } catch {}
+      let apiToken: string | null = null;
+      try { apiToken = await this.getApiToken(baseUrl, token); } catch {}
+      return { tokenType: 'session', userInfo, balance, apiToken };
+    }
+
+    // 2. Try as API key (for /v1/models)
+    try {
+      const models = await this.getModels(baseUrl, token);
+      if (models && models.length > 0) {
+        return { tokenType: 'apikey', models };
+      }
+    } catch {}
+
+    return { tokenType: 'unknown' };
+  }
+
+  async getUserInfo(baseUrl: string, accessToken: string): Promise<UserInfo | null> {
+    try {
+      const res = await this.fetchJson<any>(`${baseUrl}/api/user/self`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res?.success && res?.data) {
+        return {
+          username: res.data.username || res.data.display_name || '',
+          displayName: res.data.display_name,
+          email: res.data.email,
+          role: res.data.role,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Pull the site-side user id out of the login payload.
+   *
+   * New API compatible sites return `{ success: true, data: { id, ... } }` on
+   * `/api/user/login`, so the id is already there at login time. Without it,
+   * callers fall back to `guessPlatformUserIdFromUsername()`, which only works
+   * when the username happens to end with the id.
+   *
+   * This lives on the base adapter so every subclass benefits. Veloera, for
+   * one, inherits `login()` as-is, yet its `authHeaders()` only sends
+   * `Veloera-User` / `New-API-User` / `User-id` when an id was resolved — so
+   * without this it hits the same e-mail-login failure.
+   */
+  protected extractLoginUserId(payload: any): number | undefined {
+    const candidates: unknown[] = [
+      payload?.data?.id,
+      payload?.data?.user?.id,
+      payload?.user?.id,
+      payload?.id,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'number') {
+        if (Number.isSafeInteger(candidate) && candidate > 0) return candidate;
+        continue;
+      }
+      // Only accept a string that is *entirely* digits. `Number.parseInt` would
+      // happily turn "80305abc" or "80305.9" into 80305 and we would then send a
+      // wrong `New-Api-User` header.
+      if (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())) {
+        const value = Number(candidate.trim());
+        if (Number.isSafeInteger(value) && value > 0) return value;
+      }
+    }
+    return undefined;
+  }
+
+  async login(baseUrl: string, username: string, password: string): Promise<LoginResult> {
+    try {
+      const res = await this.fetchJson<any>(`${baseUrl}/api/user/login`, {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      if (res?.success && res?.data) {
+        return {
+          success: true,
+          accessToken: typeof res.data === 'string' ? res.data : res.data.token || res.data.access_token,
+          username,
+          platformUserId: this.extractLoginUserId(res),
+        };
+      }
+      return { success: false, message: res?.message || '登录失败' };
+    } catch (err: any) {
+      return { success: false, message: err.message || '登录请求失败' };
+    }
+  }
+
+  async getApiToken(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<string | null> {
+    return null;
+  }
+
+  async getApiTokens(baseUrl: string, accessToken: string, platformUserId?: number): Promise<ApiTokenInfo[]> {
+    const token = await this.getApiToken(baseUrl, accessToken, platformUserId);
+    if (!token) return [];
+    return [{ name: 'default', key: token, enabled: true, tokenGroup: 'default' }];
+  }
+
+  async createApiToken(
+    _baseUrl: string,
+    _accessToken: string,
+    _platformUserId?: number,
+    _options?: CreateApiTokenOptions,
+  ): Promise<boolean> {
+    return false;
+  }
+
+  async getUserGroups(
+    _baseUrl: string,
+    _accessToken: string,
+    _platformUserId?: number,
+  ): Promise<string[]> {
+    return ['default'];
+  }
+
+  async deleteApiToken(
+    _baseUrl: string,
+    _accessToken: string,
+    _tokenKey: string,
+    _platformUserId?: number,
+  ): Promise<boolean> {
+    return false;
+  }
+
+  protected async fetchJson<T>(url: string, options?: UndiciRequestInit): Promise<T> {
+    const { fetch } = await import('undici');
+    const requestOptions: UndiciRequestInit = {
+      ...options,
+      body: options?.body ?? undefined,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    };
+    const proxiedRequestOptions = await withSiteProxyRequestInit(url, requestOptions);
+    const res = await fetch(url, proxiedRequestOptions);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  protected buildNoticeSourceKey(content: string): string {
+    const normalized = (content || '').trim();
+    return `notice:${createHash('sha1').update(normalized).digest('hex')}`;
+  }
+}

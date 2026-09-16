@@ -1,0 +1,1 @@
+ALTER TABLE `model_availability` ADD `is_manual` integer DEFAULT false;
