@@ -82,6 +82,25 @@ type SiteAvailabilitySummary = {
   buckets: SiteAvailabilityBucket[];
 };
 
+type DashboardWindowMetrics = {
+  windowMinutes: number;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  businessLimitCount: number;
+  totalTokensAll: number;
+  averageLatencyMs: number | null;
+  averageFirstByteLatencyMs: number | null;
+  peakQps: number;
+  buckets: Array<{
+    requestCount: number;
+    successCount: number;
+    failedCount: number;
+    businessLimitCount: number;
+    totalTokens: number;
+  }>;
+};
+
 function formatAvailabilityPercent(value: number | null | undefined): string {
   if (
     typeof value !== "number" ||
@@ -233,10 +252,17 @@ export default function Dashboard({
   const [siteTrend, setSiteTrend] = useState<any[]>([]);
   const [siteLoading, setSiteLoading] = useState(true);
   const [sites, setSites] = useState<any[]>([]);
+  const [accounts, setAccounts] = useState<any[] | null>(null);
+  const [runtimeMetrics, setRuntimeMetrics] =
+    useState<DashboardWindowMetrics | null>(null);
+  const [runtimeMetricsLoading, setRuntimeMetricsLoading] = useState(false);
   const [siteSpeedStates, setSiteSpeedStates] = useState<
     Record<string, SiteSpeedState>
   >({});
   const [trendDays, setTrendDays] = useState(7);
+  const [liveWindow, setLiveWindow] = useState(1);
+  const [siteFilter, setSiteFilter] = useState("all");
+  const [platformFilter, setPlatformFilter] = useState("all");
   const [showInactiveSites, setShowInactiveSites] = useState(false);
   const toast = useToast();
   const normalizedAdminName = (adminName || "").trim() || "\u7ba1\u7406\u5458";
@@ -288,14 +314,22 @@ export default function Dashboard({
     async (forceRefresh = false) => {
       setSiteLoading(true);
       try {
-        const snapshot = await api.getSiteSnapshot(
-          trendDays,
-          forceRefresh ? { refresh: true } : undefined,
-        );
+        const [snapshot, accountsSnapshot] = await Promise.all([
+          api.getSiteSnapshot(
+            trendDays,
+            forceRefresh ? { refresh: true } : undefined,
+          ),
+          api.getAccountsSnapshot(forceRefresh ? { refresh: true } : undefined),
+        ]);
         setSiteDistribution(snapshot.distribution || []);
         setSiteTrend(snapshot.trend || []);
         const siteRows = Array.isArray(snapshot.sites) ? snapshot.sites : [];
         setSites(siteRows.filter((site: any) => site?.status !== "disabled"));
+        setAccounts(
+          Array.isArray(accountsSnapshot?.accounts)
+            ? accountsSnapshot.accounts
+            : [],
+        );
         setSiteSpeedStates({});
       } catch (err) {
         console.error("Failed to load site stats:", err);
@@ -304,6 +338,35 @@ export default function Dashboard({
       }
     },
     [trendDays],
+  );
+
+  const loadRuntimeMetrics = useCallback(
+    async (forceRefresh = false) => {
+      setRuntimeMetricsLoading(true);
+      try {
+        const selectedSiteIds = sites
+          .filter(
+            (site) =>
+              (siteFilter === "all" || String(site.id) === siteFilter) &&
+              (platformFilter === "all" || site.platform === platformFilter),
+          )
+          .map((site) => Number(site.id))
+          .filter((siteId) => Number.isFinite(siteId) && siteId > 0);
+        const result = await api.getDashboardWindowMetrics({
+          siteIds: selectedSiteIds,
+          windowMinutes: liveWindow,
+        });
+        setRuntimeMetrics(result);
+      } catch (err: any) {
+        setRuntimeMetrics(null);
+        if (forceRefresh) {
+          toast.error(err?.message || "加载实时指标失败");
+        }
+      } finally {
+        setRuntimeMetricsLoading(false);
+      }
+    },
+    [liveWindow, platformFilter, siteFilter, sites, toast],
   );
 
   useEffect(() => {
@@ -317,6 +380,24 @@ export default function Dashboard({
   useEffect(() => {
     loadSiteStats();
   }, [loadSiteStats]);
+
+  useEffect(() => {
+    if (sites.length === 0) {
+      setRuntimeMetrics(null);
+      return;
+    }
+    void loadRuntimeMetrics();
+  }, [liveWindow, loadRuntimeMetrics, sites.length]);
+
+  useEffect(() => {
+    if (sites.length === 0) return undefined;
+    const timer = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void loadRuntimeMetrics();
+      }
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [liveWindow, loadRuntimeMetrics, sites.length]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -501,6 +582,8 @@ export default function Dashboard({
   const activeAccounts = safeNumber(data?.activeAccounts);
   const totalAccounts = safeNumber(data?.totalAccounts);
   const proxy24hSuccess = safeNumber(data?.proxy24h?.success);
+  const proxy24hFailed = safeNumber(data?.proxy24h?.failed);
+  const proxy24hBusinessLimit = safeNumber(data?.proxy24h?.businessLimit);
   const proxy24hTotal = safeNumber(data?.proxy24h?.total);
   const totalTokens = safeNumber(data?.proxy24h?.totalTokens);
   const performanceWindowSeconds = Math.max(
@@ -523,6 +606,103 @@ export default function Dashboard({
   const siteAvailability = showInactiveSites
     ? [...activeSites, ...inactiveSites]
     : activeSites;
+  const visibleSiteAvailability = siteAvailability.filter(
+    (site) =>
+      (siteFilter === "all" || String(site.siteId) === siteFilter) &&
+      (platformFilter === "all" || site.platform === platformFilter),
+  );
+
+  const selectedSites = sites.filter(
+    (site) =>
+      (siteFilter === "all" || String(site.id) === siteFilter) &&
+      (platformFilter === "all" || site.platform === platformFilter),
+  );
+  const scopedAccounts = accounts == null || sites.length === 0 ? null : accounts.filter(
+    (account) =>
+      selectedSites.some((site) => site.id === account.siteId) &&
+      account.site?.status !== "disabled",
+  );
+  const scopedActiveAccounts =
+    scopedAccounts == null
+      ? activeAccounts
+      : scopedAccounts.filter((account) => account.status === "active").length;
+  const scopedTotalAccounts = scopedAccounts == null ? totalAccounts : scopedAccounts.length;
+  const scopedRequestTotal = runtimeMetrics?.totalCount ?? proxy24hTotal;
+  const scopedSuccessCount = runtimeMetrics?.successCount ?? proxy24hSuccess;
+  const scopedFailedCount = runtimeMetrics?.failedCount ?? proxy24hFailed;
+  const scopedBusinessLimit =
+    runtimeMetrics?.businessLimitCount ?? proxy24hBusinessLimit;
+  const scopedTokens = runtimeMetrics?.totalTokensAll ?? totalTokens;
+  const scopedWindowMinutes = runtimeMetrics?.windowMinutes ?? 1;
+  const scopedQps = runtimeMetrics
+    ? scopedRequestTotal / (scopedWindowMinutes * 60)
+    : requestsPerMinute / 60;
+  const scopedTps = runtimeMetrics
+    ? scopedTokens / (scopedWindowMinutes * 60)
+    : tokensPerMinute / 60;
+  const scopedPeakQps = runtimeMetrics?.peakQps ?? 0;
+  const liveChartBuckets = runtimeMetrics?.buckets || [];
+  const liveChartMaxQps = Math.max(
+    scopedPeakQps,
+    ...liveChartBuckets.map((bucket) =>
+      bucket.requestCount / Math.max(1, (scopedWindowMinutes * 60) / 20),
+    ),
+    0.1,
+  );
+  const proxySuccessRate =
+    scopedRequestTotal > 0
+      ? (scopedSuccessCount / scopedRequestTotal) * 100
+      : null;
+  const proxyErrorRate =
+    proxySuccessRate == null ? null : 100 - proxySuccessRate;
+  const slaRequestTotal = Math.max(0, scopedRequestTotal - scopedBusinessLimit);
+  const slaFailedCount = Math.max(0, scopedFailedCount - scopedBusinessLimit);
+  const slaSuccessRate =
+    slaRequestTotal > 0
+      ? ((slaRequestTotal - slaFailedCount) / slaRequestTotal) * 100
+      : null;
+  const upstreamFailedCount = Math.max(0, scopedFailedCount - scopedBusinessLimit);
+  const upstreamErrorRate =
+    slaRequestTotal > 0 ? (upstreamFailedCount / slaRequestTotal) * 100 : null;
+  const averageQps = scopedQps;
+  const averageTps = scopedTps;
+  const healthPercent =
+    scopedTotalAccounts > 0
+      ? Math.round((scopedActiveAccounts / scopedTotalAccounts) * 100)
+      : 0;
+  const healthLabel =
+    scopedTotalAccounts === 0
+      ? "待机"
+      : scopedActiveAccounts === scopedTotalAccounts
+        ? "正常"
+        : scopedActiveAccounts > 0
+          ? "降级"
+          : "离线";
+  const modelRanking = Array.isArray(insightsData?.modelAnalysis?.callRanking)
+    ? insightsData.modelAnalysis.callRanking
+    : [];
+  const weightedLatency = modelRanking.reduce(
+    (sum: number, item: any) =>
+      sum + safeNumber(item.avgLatencyMs) * safeNumber(item.calls),
+    0,
+  );
+  const rankedCalls = modelRanking.reduce(
+    (sum: number, item: any) => sum + safeNumber(item.calls),
+    0,
+  );
+  const modelAverageLatencyMs =
+    rankedCalls > 0 ? Math.round(weightedLatency / rankedCalls) : null;
+  const averageLatencyMs =
+    runtimeMetrics?.averageLatencyMs ?? modelAverageLatencyMs;
+  const ttftMs = runtimeMetrics?.averageFirstByteLatencyMs ?? null;
+  const refreshLabel = data?.generatedAt
+    ? new Date(data.generatedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "—";
+  const metricsScopeLabel = runtimeMetrics ? "当前窗口" : "最近 24h";
 
   const getLatencyColor = (ms: number) =>
     ms <= 500
@@ -573,33 +753,104 @@ export default function Dashboard({
   };
 
   return (
-    <div className="animate-fade-in">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 24,
-        }}
-      >
-        <h2 className="greeting">
-          {getGreeting() + "\uFF0C" + normalizedAdminName}
-        </h2>
-        <div style={{ display: "flex", gap: 8 }}>
+    <div className="ops-dashboard animate-fade-in">
+      <header className="ops-dashboard-header">
+        <div>
+          <div className="ops-dashboard-title-row">
+            <span className="ops-dashboard-title-icon" aria-hidden="true">
+              <svg
+                width="20"
+                height="20"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M4 13h4l2-8 4 14 2-6h4"
+                />
+              </svg>
+            </span>
+            <h1 className="ops-dashboard-title">运维监控</h1>
+          </div>
+          <div className="ops-dashboard-status">
+            <span
+              className={
+                "ops-status-dot " +
+                (healthLabel === "离线"
+                  ? "is-danger"
+                  : healthLabel === "降级"
+                    ? "is-warning"
+                    : "")
+              }
+            />
+            <span>{healthLabel}</span>
+            <span className="ops-status-divider">·</span>
+            <span>刷新：{refreshLabel}</span>
+          </div>
+        </div>
+        <div className="ops-dashboard-toolbar">
+          <select
+            className="ops-select"
+            aria-label="站点筛选"
+            value={siteFilter}
+            onChange={(event) => setSiteFilter(event.target.value)}
+          >
+            <option value="all">全部站点</option>
+            {rawSiteAvailability.map((site) => (
+              <option key={site.siteId} value={site.siteId}>
+                {site.siteName}
+              </option>
+            ))}
+          </select>
+          <select
+            className="ops-select"
+            aria-label="平台筛选"
+            value={platformFilter}
+            onChange={(event) => setPlatformFilter(event.target.value)}
+          >
+            <option value="all">全部平台</option>
+            {[
+              ...new Set(
+                rawSiteAvailability
+                  .map((site) => site.platform)
+                  .filter(Boolean),
+              ),
+            ].map((platform) => (
+              <option key={platform} value={platform || ""}>
+                {platform}
+              </option>
+            ))}
+          </select>
+          <select
+            className="ops-select ops-select-wide"
+            aria-label="时间范围"
+            value={trendDays}
+            onChange={(event) => setTrendDays(Number(event.target.value))}
+          >
+            <option value={7}>近 7 天</option>
+            <option value={30}>近 30 天</option>
+            <option value={90}>近 90 天</option>
+          </select>
           <button
+            className="ops-toolbar-icon"
             onClick={() => {
               void load(true);
               void loadInsights(true);
               void loadSiteStats(true);
+              if (sites.length > 0) {
+                void loadRuntimeMetrics(true);
+              }
             }}
             disabled={refreshing}
-            className="topbar-icon-btn"
-            data-tooltip="刷新"
-            aria-label="刷新"
+            aria-label="刷新数据"
+            title="刷新数据"
           >
             <svg
-              width="18"
-              height="18"
+              width="17"
+              height="17"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -610,906 +861,598 @@ export default function Dashboard({
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                strokeWidth={1.8}
+                d="M4 4v5h.6m15.3 2A8 8 0 0 0 4.6 9M4.6 9H9m11 11v-5h-.6m0 0a8 8 0 0 1-15.3-2m15.3 2H15"
               />
             </svg>
           </button>
-        </div>
-      </div>
-
-      <div className="dashboard-stat-grid">
-        <div className="stat-card animate-slide-up stagger-1">
-          <div className="stat-card-header">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-              />
-            </svg>
-            账户数据
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-blue">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">当前余额</div>
-              <div className="stat-value animate-count-up">
-                ${totalBalance.toFixed(2)}
-              </div>
-            </div>
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-green">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">累计消耗</div>
-              <div className="stat-value animate-count-up">
-                ${totalUsed.toFixed(2)}
-              </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color:
-                    todaySpend > 0
-                      ? "var(--color-danger)"
-                      : "var(--color-text-muted)",
-                  fontWeight: 500,
-                  marginTop: 2,
-                }}
-              >
-                今日 -{todaySpend.toFixed(2)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-card animate-slide-up stagger-2">
-          <div className="stat-card-header">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-            使用统计
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-yellow">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">24h 请求</div>
-              <div className="stat-value animate-count-up">
-                {Math.round(proxy24hTotal).toLocaleString()}
-              </div>
-            </div>
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-cyan">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">成功请求</div>
-              <div className="stat-value animate-count-up">
-                {Math.round(proxy24hSuccess).toLocaleString()}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-card animate-slide-up stagger-3">
-          <div className="stat-card-header">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-            资源消耗
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-pink">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">活跃账户</div>
-              <div className="stat-value animate-count-up">
-                {Math.round(activeAccounts)}/{Math.round(totalAccounts)}
-              </div>
-            </div>
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-red">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">24h Tokens</div>
-              <div className="stat-value animate-count-up">
-                {formatCompactTokenMetric(totalTokens)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-card animate-slide-up stagger-5">
-          <div className="stat-card-header">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 3v10h8M5 12h3m-3 4h6m-6 4h10a2 2 0 002-2V8.828a2 2 0 00-.586-1.414l-4.828-4.828A2 2 0 0010.172 2H5a2 2 0 00-2 2v14a2 2 0 002 2z"
-              />
-            </svg>
-            性能指标
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-blue">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 13h4v7H4zm6-9h4v16h-4zm6 5h4v11h-4z"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">RPM</div>
-              <div className="stat-value animate-count-up">
-                {Math.round(requestsPerMinute).toLocaleString()}
-              </div>
-              <div className="dashboard-stat-note">
-                最近 {performanceWindowSeconds} 秒请求
-              </div>
-            </div>
-          </div>
-          <div className="stat-card-row">
-            <div className="stat-icon stat-icon-cyan">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4m13-5l3 3-3 3M8 7L5 10l3 3"
-                />
-              </svg>
-            </div>
-            <div className="dashboard-stat-content">
-              <div className="stat-label">TPM</div>
-              <div className="stat-value animate-count-up">
-                {formatCompactTokenMetric(tokensPerMinute)}
-              </div>
-              <div className="dashboard-stat-note">
-                最近 {performanceWindowSeconds} 秒 Tokens
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 站点级分析 */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-          marginTop: 8,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-          }}
-        >
-          <svg
-            width="16"
-            height="16"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+          <Link
+            className="ops-toolbar-button ops-toolbar-button-primary"
+            to="/settings/notify"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-            />
-          </svg>
-          站点分析
+            预警规则
+          </Link>
+          <Link className="ops-toolbar-button" to="/settings">
+            设置
+          </Link>
         </div>
-        <div style={{ display: "flex", gap: 4 }}>
-          {[7, 30, 90].map((d) => (
-            <button
-              key={d}
-              onClick={() => setTrendDays(d)}
-              style={{
-                padding: "4px 12px",
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: 500,
-                border: "none",
-                cursor: "pointer",
-                background:
-                  trendDays === d ? "var(--color-primary)" : "var(--color-bg)",
-                color:
-                  trendDays === d ? "white" : "var(--color-text-secondary)",
-                transition: "all 0.2s ease",
-              }}
-            >
-              {d}天
-            </button>
-          ))}
-        </div>
-      </div>
+      </header>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-          gap: 16,
-          marginBottom: 24,
-        }}
+      <section
+        className="ops-overview-grid"
+        aria-label="运行概览"
+        aria-busy={runtimeMetricsLoading}
       >
-        <div className="chart-panel-enter animate-slide-up stagger-6">
+        <article className="ops-live-card">
+          <div className="ops-health-block">
+            <svg
+              className="ops-health-ring"
+              viewBox="0 0 120 120"
+              role="img"
+              aria-label={"系统健康度 " + healthPercent + "%"}
+            >
+              <circle
+                className="ops-health-ring-track"
+                cx="60"
+                cy="60"
+                r="48"
+              />
+              <circle
+                className="ops-health-ring-progress"
+                cx="60"
+                cy="60"
+                r="48"
+                pathLength="100"
+                style={{ strokeDasharray: healthPercent + " 100" }}
+              />
+            </svg>
+            <div className="ops-health-ring-copy">
+              <strong>{healthLabel}</strong>
+              <span>健康度</span>
+            </div>
+            <div className="ops-health-caption">
+              健康状态 <span aria-hidden="true">ⓘ</span>
+            </div>
+            <div className="ops-health-state">
+              {scopedActiveAccounts}/{scopedTotalAccounts} 个账户在线
+            </div>
+          </div>
+          <div className="ops-live-content">
+            <div className="ops-card-heading ops-live-heading">
+              <span className="ops-heading-accent ops-heading-accent-blue" />
+              <span>实时信息</span>
+              <span className="ops-info-icon" title="最近窗口内的代理吞吐">
+                ⓘ
+              </span>
+              <div
+                className="ops-segmented-control"
+                role="group"
+                aria-label="实时窗口"
+              >
+                {[1, 5, 30, 60].map((minutes) => (
+                  <button
+                    key={minutes}
+                    className={liveWindow === minutes ? "active" : ""}
+                    onClick={() => setLiveWindow(minutes)}
+                  >
+                    {minutes < 60 ? minutes + "min" : "1h"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="ops-live-kpis">
+              <div>
+                <span>当前</span>
+                <strong>
+                  {averageQps.toFixed(1)} <small>QPS</small>
+                </strong>
+              </div>
+              <div>
+                <span className="ops-kpi-spacer">&nbsp;</span>
+                <strong>
+                  {averageTps.toFixed(1)} <small>TPS</small>
+                </strong>
+              </div>
+              <div>
+                <span>峰值</span>
+                <strong>
+                  {scopedPeakQps.toFixed(1)}{" "}
+                  <small>QPS</small>
+                </strong>
+              </div>
+              <div>
+                <span className="ops-kpi-spacer">&nbsp;</span>
+                <strong>
+                  {formatCompactTokenMetric(scopedTokens)} <small>Tokens</small>
+                </strong>
+              </div>
+            </div>
+            <div className="ops-live-chart" aria-hidden="true">
+              {liveChartBuckets.map((bucket, index) => {
+                const bucketQps =
+                  bucket.requestCount /
+                  Math.max(1, (scopedWindowMinutes * 60) / 20);
+                const height = bucket.requestCount
+                  ? Math.max(8, (bucketQps / liveChartMaxQps) * 100)
+                  : 4;
+                return (
+                  <span
+                    key={index}
+                    title={`${bucket.requestCount} 请求 · ${bucketQps.toFixed(2)} QPS`}
+                    style={{ height: height + "%" }}
+                  />
+                );
+              })}
+            </div>
+            <div className="ops-live-chart-label">
+              最近 {liveWindow === 60 ? "1 小时" : liveWindow + " 分钟"} · QPS /
+              TPS 实时采样
+            </div>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+              <span>请求 · {metricsScopeLabel}</span>
+            <span className="ops-info-icon" title="最近 24 小时请求统计">
+              ⓘ
+            </span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div className="ops-metric-line">
+            <span>请求数</span>
+            <strong>{Math.round(scopedRequestTotal).toLocaleString()}</strong>
+          </div>
+          <div className="ops-metric-line">
+            <span>Token 数</span>
+            <strong>{formatCompactTokenMetric(scopedTokens)}</strong>
+          </div>
+          <div className="ops-metric-subgrid">
+            <span>
+              平均 QPS <b>{averageQps.toFixed(1)}</b>
+            </span>
+            <span>
+              平均 TPS <b>{averageTps.toFixed(1)}</b>
+            </span>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+            <span>SLA（排除业务限制）</span>
+            <span className="ops-info-icon">ⓘ</span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div
+            className="ops-sla-value"
+            style={{
+              color:
+                slaSuccessRate == null
+                  ? "var(--ops-muted)"
+                  : "var(--ops-green)",
+            }}
+          >
+            {slaSuccessRate == null ? "—" : slaSuccessRate.toFixed(2) + "%"}
+          </div>
+          <div className="ops-progress-track">
+            <span
+              style={{
+                width: Math.max(0, Math.min(100, slaSuccessRate ?? 0)) + "%",
+              }}
+            />
+          </div>
+          <div className="ops-metric-footer">
+            <span>异常数</span>
+            <strong>{Math.round(slaFailedCount).toLocaleString()}</strong>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+            <span>请求错误</span>
+            <span className="ops-info-icon">ⓘ</span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div
+            className="ops-big-percent"
+            style={{
+              color:
+                proxyErrorRate == null
+                  ? "var(--ops-muted)"
+                  : proxyErrorRate > 0
+                    ? "var(--ops-red)"
+                    : "var(--ops-green)",
+            }}
+          >
+            {proxyErrorRate == null ? "—" : proxyErrorRate.toFixed(2) + "%"}
+          </div>
+          <div className="ops-metric-footer">
+            <span>错误数</span>
+            <strong>{Math.round(scopedFailedCount).toLocaleString()}</strong>
+          </div>
+          <div className="ops-metric-footer">
+            <span>业务限制</span>
+            <strong>{Math.round(scopedBusinessLimit).toLocaleString()}</strong>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+            <span>请求时长</span>
+            <span className="ops-info-icon">ⓘ</span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div className="ops-latency-value">
+            {averageLatencyMs == null ? "—" : averageLatencyMs}{" "}
+            <small>ms (平均)</small>
+          </div>
+          <div className="ops-latency-grid">
+            <span>
+              P95: <b>—</b>
+            </span>
+            <span>
+              P90: <b>—</b>
+            </span>
+            <span>
+              P50: <b>—</b>
+            </span>
+            <span>
+              Avg.:{" "}
+              <b>{averageLatencyMs == null ? "—" : averageLatencyMs + "ms"}</b>
+            </span>
+            <span>
+              Max.: <b>—</b>
+            </span>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+            <span>TTFT</span>
+            <span className="ops-info-icon">ⓘ</span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div className="ops-latency-value">
+            {ttftMs == null ? "—" : ttftMs} <small>ms (平均)</small>
+          </div>
+          <div className="ops-latency-grid">
+            <span>
+              P95: <b>—</b>
+            </span>
+            <span>
+              P90: <b>—</b>
+            </span>
+            <span>
+              P50: <b>—</b>
+            </span>
+            <span>
+              Avg.: <b>{ttftMs == null ? "—" : ttftMs + "ms"}</b>
+            </span>
+            <span>
+              Max.: <b>—</b>
+            </span>
+          </div>
+        </article>
+
+        <article className="ops-metric-card">
+          <div className="ops-card-heading">
+            <span>上游错误</span>
+            <span className="ops-info-icon">ⓘ</span>
+            <Link to="/logs">明细</Link>
+          </div>
+          <div
+            className="ops-big-percent"
+            style={{
+              color: upstreamFailedCount > 0 ? "var(--ops-red)" : "var(--ops-green)",
+            }}
+          >
+            {upstreamErrorRate == null
+              ? "—"
+              : upstreamErrorRate.toFixed(2) + "%"}
+          </div>
+          <div className="ops-metric-footer">
+            <span>错误数（排除 429/529）</span>
+            <strong>{Math.round(upstreamFailedCount).toLocaleString()}</strong>
+          </div>
+          <div className="ops-metric-footer">
+            <span>429/529</span>
+            <strong>{Math.round(scopedBusinessLimit).toLocaleString()}</strong>
+          </div>
+        </article>
+      </section>
+
+      <section className="ops-resource-strip" aria-label="系统资源状态">
+        <div>
+          <span className="ops-resource-label">
+            账户 <span className="ops-info-icon">ⓘ</span>
+          </span>
+          <strong>
+            {scopedActiveAccounts}/{scopedTotalAccounts}
+          </strong>
+          <small>活跃账户 / 总账户</small>
+        </div>
+        <div>
+          <span className="ops-resource-label">
+            站点 <span className="ops-info-icon">ⓘ</span>
+          </span>
+          <strong>{rawSiteAvailability.length}</strong>
+          <small>{activeSites.length} 个有流量</small>
+        </div>
+        <div>
+          <span className="ops-resource-label">
+            24h 请求 <span className="ops-info-icon">ⓘ</span>
+          </span>
+            <strong>{Math.round(scopedRequestTotal).toLocaleString()}</strong>
+            <small>{Math.round(scopedSuccessCount).toLocaleString()} 次成功</small>
+        </div>
+        <div>
+          <span className="ops-resource-label">
+            24h Tokens <span className="ops-info-icon">ⓘ</span>
+          </span>
+          <strong>{formatCompactTokenMetric(scopedTokens)}</strong>
+          <small>累计处理量</small>
+        </div>
+        <div>
+          <span className="ops-resource-label">
+            路由 <span className="ops-info-icon">ⓘ</span>
+          </span>
+          <strong className={sites.length ? "is-good" : "is-muted"}>
+            {sites.length ? "正常" : "待配置"}
+          </strong>
+          <small>{sites.length} 个代理端点</small>
+        </div>
+        <div>
+          <span className="ops-resource-label">
+            采样窗口 <span className="ops-info-icon">ⓘ</span>
+          </span>
+          <strong>正常</strong>
+          <small>最近 {performanceWindowSeconds} 秒实时指标</small>
+        </div>
+      </section>
+
+      <section className="ops-section">
+        <div className="ops-section-heading">
+          <div>
+            <h2>业务分析</h2>
+            <p>围绕站点、模型和请求趋势查看运行情况</p>
+          </div>
+          <div className="ops-days-control">
+            {[7, 30, 90].map((days) => (
+              <button
+                key={days}
+                className={trendDays === days ? "active" : ""}
+                onClick={() => setTrendDays(days)}
+              >
+                {days}天
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="ops-chart-grid">
           <Suspense fallback={<ChartFallback height={320} />}>
             <SiteDistributionChart
               data={siteDistribution}
               loading={siteLoading}
             />
           </Suspense>
-        </div>
-        <div className="chart-panel-enter animate-slide-up stagger-7">
           <Suspense fallback={<ChartFallback height={320} />}>
             <SiteTrendChart data={siteTrend} loading={siteLoading} />
           </Suspense>
         </div>
-      </div>
+      </section>
 
-      <div className="chart-container animate-slide-up stagger-8 site-observability-panel">
-        <div className="site-observability-header">
-          <div>
-            <div className="site-observability-title">
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 12h4l3 8 4-16 3 8h4"
-                />
-              </svg>
-              站点可用性观测
-              <span className="site-observability-count-badge">
-                {activeSites.length}/{rawSiteAvailability.length}
-              </span>
+      <section className="ops-lower-grid">
+        <div className="chart-container ops-panel">
+          <div className="ops-panel-heading">
+            <div>
+              <h2>站点可用性观测</h2>
+              <p>最近 24 小时 · 每色块 = 1h · 按使用量排序</p>
             </div>
-            <div className="site-observability-subtitle">
-              最近 24 小时 · 每色块 = 1h · 按使用量排序
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="site-observability-legend">
-              <span className="site-observability-legend-text">低</span>
-              <span
-                className="site-observability-legend-chip"
-                style={{ background: getAvailabilityColor(0) }}
-              />
-              <span
-                className="site-observability-legend-chip"
-                style={{ background: getAvailabilityColor(50) }}
-              />
-              <span
-                className="site-observability-legend-chip"
-                style={{ background: getAvailabilityColor(100) }}
-              />
-              <span className="site-observability-legend-text">高</span>
+              <span>低</span>
+              <i style={{ background: getAvailabilityColor(0) }} />
+              <i style={{ background: getAvailabilityColor(50) }} />
+              <i style={{ background: getAvailabilityColor(100) }} />
+              <span>高</span>
             </div>
-            {inactiveSites.length > 0 && (
-              <button
-                className="site-observability-toggle-btn"
-                onClick={() => setShowInactiveSites((v) => !v)}
-              >
-                {showInactiveSites
-                  ? "隐藏未使用"
-                  : `显示未使用 (${inactiveSites.length})`}
-              </button>
-            )}
           </div>
-        </div>
-
-        {insightsLoading && rawSiteAvailability.length === 0 ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            {[...Array(4)].map((_, index) => (
-              <div
-                key={index}
-                className="card"
-                style={{ minHeight: 88, padding: 16 }}
-              >
+          {visibleSiteAvailability.length > 0 ? (
+            <div className="site-observability-grid">
+              {visibleSiteAvailability.slice(0, 6).map((site) => (
                 <div
-                  className="skeleton"
-                  style={{ width: 160, height: 14, marginBottom: 10 }}
-                />
-                <div
-                  className="skeleton"
-                  style={{ width: "100%", height: 12, marginBottom: 8 }}
-                />
-                <div
-                  className="skeleton"
-                  style={{ width: "100%", height: 18, borderRadius: 8 }}
-                />
-              </div>
-            ))}
-          </div>
-        ) : siteAvailability.length > 0 ? (
-          <div className="site-observability-grid">
-            {siteAvailability.map((site) => (
-              <div
-                key={site.siteId}
-                className={`site-observability-card${site.totalRequests > 0 ? "" : " site-observability-card--inactive"}`}
-              >
-                <div className="site-observability-card-top">
-                  <div className="site-observability-card-title">
-                    <span className="site-observability-site-name">
-                      {site.siteName}
-                    </span>
-                    {site.platform && (
-                      <span className="site-observability-platform-badge">
-                        {site.platform}
+                  key={site.siteId}
+                  className={
+                    "site-observability-card" +
+                    (site.totalRequests > 0
+                      ? ""
+                      : " site-observability-card--inactive")
+                  }
+                >
+                  <div className="site-observability-card-top">
+                    <div className="site-observability-card-title">
+                      <span className="site-observability-site-name">
+                        {site.siteName}
                       </span>
-                    )}
-                  </div>
-                  <Link
-                    to={buildSiteLast24hLogsRoute(site.siteId)}
-                    className="site-observability-log-link-compact"
-                    title="查看日志"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
+                      {site.platform && (
+                        <span className="site-observability-platform-badge">
+                          {site.platform}
+                        </span>
+                      )}
+                    </div>
+                    <Link
+                      to={buildSiteLast24hLogsRoute(site.siteId)}
+                      className="site-observability-log-link-compact"
+                      aria-label={"查看 " + site.siteName + " 日志"}
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5l7 7-7 7"
+                      →
+                    </Link>
+                  </div>
+                  <div className="site-observability-card-metrics">
+                    <strong
+                      style={{
+                        color: getAvailabilityColor(site.availabilityPercent),
+                      }}
+                    >
+                      {formatAvailabilityPercent(site.availabilityPercent)}
+                    </strong>
+                    <span>·</span>
+                    <span>
+                      {site.averageLatencyMs != null
+                        ? site.averageLatencyMs + "ms"
+                        : "—"}
+                    </span>
+                    <span>·</span>
+                    <span>{Math.round(site.totalRequests || 0)} 次</span>
+                  </div>
+                  <div className="site-availability-strip-compact">
+                    {site.buckets.map((bucket, index) => (
+                      <Link
+                        key={site.siteId + "-" + index}
+                        to={buildAvailabilityBucketLogsRoute(
+                          site.siteId,
+                          bucket,
+                        )}
+                        className="site-availability-cell site-availability-cell-link site-availability-cell-pill"
+                        style={{
+                          background: getAvailabilityColor(
+                            bucket.availabilityPercent,
+                          ),
+                          opacity: bucket.totalRequests > 0 ? 1 : 0.3,
+                        }}
+                        aria-label={
+                          site.siteName +
+                          " " +
+                          formatAvailabilityBucketLabel(bucket) +
+                          " 使用日志"
+                        }
                       />
-                    </svg>
-                  </Link>
+                    ))}
+                  </div>
                 </div>
-                <div className="site-observability-card-metrics">
-                  <span
-                    className="site-observability-metric-main"
-                    style={{
-                      color: getAvailabilityColor(site.availabilityPercent),
+              ))}
+            </div>
+          ) : (
+            <div className="ops-empty-state">
+              <strong>暂无站点观测数据</strong>
+              <span>有代理请求后，这里会自动生成可用性和响应速度。</span>
+            </div>
+          )}
+        </div>
+        <div className="chart-container ops-panel ops-model-panel">
+          <div className="ops-panel-heading">
+            <div>
+              <h2>模型数据分析</h2>
+              <p>近 7 天调用与消耗概览</p>
+            </div>
+            <Link className="ops-inline-link" to="/models">
+              查看模型
+            </Link>
+          </div>
+          {insightsLoading && !insightsData ? (
+            <ChartFallback height={240} />
+          ) : (
+            <Suspense fallback={<ChartFallback height={240} />}>
+              <ModelAnalysisPanel data={insightsData?.modelAnalysis} />
+            </Suspense>
+          )}
+        </div>
+      </section>
+
+      <section className="ops-panel ops-sites-panel">
+        <div className="ops-panel-heading">
+          <div>
+            <h2>代理端点</h2>
+            <p>快速检查当前站点连接状态</p>
+          </div>
+          {sites.length > 0 && (
+            <button
+              className="ops-inline-link ops-inline-button"
+              onClick={async () => {
+                await Promise.all(
+                  sites.map(async (site: any, idx: number) => {
+                    const siteKey = getSiteSpeedKey(site, idx);
+                    setSiteSpeedState(siteKey, { status: "loading" });
+                    try {
+                      const begin = performance.now();
+                      await fetch(site.url + "/v1/models", {
+                        method: "GET",
+                        mode: "no-cors",
+                      });
+                      setSiteSpeedState(siteKey, {
+                        status: "done",
+                        ms: Math.round(performance.now() - begin),
+                      });
+                    } catch {
+                      setSiteSpeedState(siteKey, { status: "timeout" });
+                    }
+                  }),
+                );
+                toast.success("全部测速完成");
+              }}
+            >
+              一键测速
+            </button>
+          )}
+        </div>
+        {sites.length > 0 ? (
+          <div className="ops-site-list">
+            {sites.map((site: any, idx: number) => (
+              <div key={site.id || idx} className="ops-site-row">
+                <div>
+                  <strong>{site.name}</strong>
+                  <span>{site.platform || "代理站点"}</span>
+                  <a href={site.url} target="_blank" rel="noopener noreferrer">
+                    {site.url}
+                  </a>
+                </div>
+                <div className="ops-site-actions">
+                  <button
+                    className="ops-speed-button"
+                    onClick={async () => {
+                      const siteKey = getSiteSpeedKey(site, idx);
+                      setSiteSpeedState(siteKey, { status: "loading" });
+                      try {
+                        const begin = performance.now();
+                        await fetch(site.url + "/v1/models", {
+                          method: "GET",
+                          mode: "no-cors",
+                        });
+                        const ms = Math.round(performance.now() - begin);
+                        setSiteSpeedState(siteKey, { status: "done", ms });
+                        toast.success(site.name + ": " + ms + "ms");
+                      } catch {
+                        setSiteSpeedState(siteKey, { status: "timeout" });
+                        toast.error(site.name + ": 测速失败");
+                      }
                     }}
                   >
-                    {formatAvailabilityPercent(site.availabilityPercent)}
-                  </span>
-                  <span className="site-observability-metric-sep">·</span>
-                  <span
-                    style={
-                      site.averageLatencyMs != null
-                        ? { color: getLatencyColor(site.averageLatencyMs) }
-                        : undefined
-                    }
+                    {renderSiteSpeedLabel(site, idx)}
+                  </button>
+                  <a
+                    className="ops-site-open"
+                    href={site.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                   >
-                    {site.averageLatencyMs != null
-                      ? `${site.averageLatencyMs}ms`
-                      : "—"}
-                  </span>
-                  <span className="site-observability-metric-sep">·</span>
-                  <span>{Math.round(site.totalRequests || 0)} 次</span>
-                </div>
-                <div className="site-availability-strip-compact">
-                  {site.buckets.map((bucket, index) => (
-                    <Link
-                      key={`${site.siteId}-${index}`}
-                      to={buildAvailabilityBucketLogsRoute(site.siteId, bucket)}
-                      className="site-availability-cell site-availability-cell-link site-availability-cell-pill"
-                      style={{
-                        background: getAvailabilityColor(
-                          bucket.availabilityPercent,
-                        ),
-                        opacity: bucket.totalRequests > 0 ? 1 : 0.3,
-                      }}
-                      data-tooltip={[
-                        `时间：${formatAvailabilityBucketLabel(bucket)}`,
-                        bucket.totalRequests > 0
-                          ? `可用性：${formatAvailabilityPercent(bucket.availabilityPercent)}`
-                          : "可用性：无请求",
-                        `请求：${bucket.totalRequests} 次`,
-                        `成功/失败：${bucket.successCount}/${bucket.failedCount}`,
-                        bucket.averageLatencyMs != null
-                          ? `平均响应：${bucket.averageLatencyMs}ms`
-                          : "平均响应：—",
-                      ].join(" · ")}
-                      data-tooltip-align="start"
-                      title={[
-                        formatAvailabilityBucketLabel(bucket),
-                        bucket.totalRequests > 0
-                          ? `可用性 ${formatAvailabilityPercent(bucket.availabilityPercent)}`
-                          : "无请求",
-                        `${bucket.successCount} 成功 / ${bucket.failedCount} 失败`,
-                        bucket.averageLatencyMs != null
-                          ? `平均响应 ${bucket.averageLatencyMs}ms`
-                          : "平均响应 —",
-                      ].join(" | ")}
-                      aria-label={`${site.siteName} ${formatAvailabilityBucketLabel(bucket)} 使用日志`}
-                    />
-                  ))}
+                    打开 ↗
+                  </a>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="site-observability-empty">
-            <div className="site-observability-empty-title">
-              暂无站点观测数据
-            </div>
-            <div className="site-observability-empty-note">
-              有代理请求后，这里会自动生成每个站点的可用性条和平均响应速度。
-            </div>
+          <div className="ops-empty-state">
+            <strong>还没有代理端点</strong>
+            <span>添加站点后，可以在这里进行连接检查。</span>
+            <Link
+              className="ops-toolbar-button ops-toolbar-button-primary"
+              to="/sites"
+            >
+              添加站点
+            </Link>
           </div>
         )}
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 300px",
-          gap: 16,
-        }}
-      >
-        <div className="chart-container animate-slide-up stagger-8">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              marginBottom: 14,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                fontSize: 14,
-                fontWeight: 600,
-                color: "var(--color-text-primary)",
-              }}
-            >
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              模型数据分析
-            </div>
-          </div>
-          {insightsLoading && !insightsData ? (
-            <ChartFallback height={260} />
-          ) : (
-            <Suspense fallback={<ChartFallback height={260} />}>
-              <ModelAnalysisPanel data={insightsData?.modelAnalysis} />
-            </Suspense>
-          )}
-        </div>
-
-        <div
-          className="chart-container animate-slide-up stagger-9"
-          style={{ display: "flex", flexDirection: "column" }}
-        >
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              marginBottom: 16,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              color: "var(--color-text-primary)",
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <svg
-                width="16"
-                height="16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
-                />
-              </svg>
-              站点信息
-            </span>
-            {sites.length > 0 && (
-              <button
-                className="btn btn-ghost"
-                style={{
-                  fontSize: 11,
-                  padding: "3px 10px",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: 6,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-                onClick={async () => {
-                  await Promise.all(
-                    sites.map(async (s: any, idx: number) => {
-                      const siteKey = getSiteSpeedKey(s, idx);
-                      setSiteSpeedState(siteKey, { status: "loading" });
-                      try {
-                        const start = performance.now();
-                        await fetch(`${s.url}/v1/models`, {
-                          method: "GET",
-                          mode: "no-cors",
-                        });
-                        const ms = Math.round(performance.now() - start);
-                        setSiteSpeedState(siteKey, { status: "done", ms });
-                      } catch {
-                        setSiteSpeedState(siteKey, { status: "timeout" });
-                      }
-                    }),
-                  );
-                  toast.success("全部测速完成");
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                  />
-                </svg>
-                一键测速
-              </button>
-            )}
-          </div>
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            {sites.length > 0 ? (
-              sites.map((site: any, idx: number) => (
-                <div
-                  key={site.id || idx}
-                  style={{
-                    padding: "10px 12px",
-                    border: "1px solid var(--color-border-light)",
-                    borderRadius: "var(--radius-md)",
-                    background: "var(--color-bg)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginBottom: 6,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>
-                      {site.name}
-                    </span>
-                    <button
-                      className="btn btn-ghost"
-                      style={{
-                        fontSize: 11,
-                        padding: "2px 8px",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: 6,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 3,
-                      }}
-                      onClick={async () => {
-                        const siteKey = getSiteSpeedKey(site, idx);
-                        setSiteSpeedState(siteKey, { status: "loading" });
-                        try {
-                          const start = performance.now();
-                          await fetch(`${site.url}/v1/models`, {
-                            method: "GET",
-                            mode: "no-cors",
-                          });
-                          const ms = Math.round(performance.now() - start);
-                          setSiteSpeedState(siteKey, { status: "done", ms });
-                          toast.success(`${site.name}: ${ms}ms`);
-                        } catch {
-                          setSiteSpeedState(siteKey, { status: "timeout" });
-                          toast.error(`${site.name}: 测速失败`);
-                        }
-                      }}
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M13 10V3L4 14h7v7l9-11h-7z"
-                        />
-                      </svg>
-                      <span>{renderSiteSpeedLabel(site, idx)}</span>
-                    </button>
-                    <a
-                      href={site.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-ghost"
-                      style={{
-                        fontSize: 11,
-                        padding: "2px 8px",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: 6,
-                        textDecoration: "none",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 3,
-                      }}
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-                        />
-                      </svg>
-                      跳转
-                    </a>
-                  </div>
-                  <a
-                    href={site.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      fontSize: 12,
-                      color: "var(--color-info)",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {site.url}
-                  </a>
-                </div>
-              ))
-            ) : (
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  padding: 20,
-                }}
-              >
-                <div style={{ width: 60, height: 60, opacity: 0.25 }}>
-                  <svg
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="var(--color-text-muted)"
-                    width="60"
-                    height="60"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={0.6}
-                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "var(--color-text-secondary)",
-                  }}
-                >
-                  代理端点可用
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-text-muted)",
-                    textAlign: "center",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  使用{" "}
-                  <code
-                    style={{
-                      background: "var(--color-bg)",
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                      fontSize: 10,
-                    }}
-                  >
-                    /v1/chat/completions
-                  </code>{" "}
-                  访问
-                </div>
-              </div>
-            )}
-            <div
-              style={{
-                marginTop: "auto",
-                paddingTop: 8,
-                borderTop: "1px solid var(--color-border-light)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--color-text-muted)",
-                  marginBottom: 2,
-                }}
-              >
-                24h 活跃调用
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {proxy24hTotal > 0
-                  ? `${Math.round(proxy24hSuccess)}/${Math.round(proxy24hTotal)}`
-                  : "—"}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

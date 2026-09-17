@@ -30,6 +30,7 @@ export type DashboardSummaryPayload = {
   proxy24h: {
     success: number;
     failed: number;
+    businessLimit: number;
     total: number;
     totalTokens: number;
   };
@@ -107,6 +108,7 @@ async function loadDashboardSummaryPayload(): Promise<DashboardSummaryPayload> {
         total: sql<number>`count(*)`,
         success: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
         failed: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 0 else 1 end), 0)`,
+        businessLimit: sql<number>`coalesce(sum(case when ${schema.proxyLogs.httpStatus} in (429, 529) then 1 else 0 end), 0)`,
         totalTokens: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
       })
       .from(schema.proxyLogs)
@@ -172,6 +174,7 @@ async function loadDashboardSummaryPayload(): Promise<DashboardSummaryPayload> {
     proxy24h: {
       success: proxySuccess,
       failed: proxyFailed,
+      businessLimit: Number(proxy24hRow?.businessLimit || 0),
       total: proxyTotal,
       totalTokens,
     },

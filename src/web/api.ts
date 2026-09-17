@@ -489,6 +489,9 @@ export type ProxyLogsSummary = {
   failedCount: number;
   totalCost: number;
   totalTokensAll: number;
+  businessLimitCount?: number;
+  averageLatencyMs?: number | null;
+  averageFirstByteLatencyMs?: number | null;
 };
 
 export type ProxyLogsQuery = {
@@ -905,6 +908,154 @@ export const api = {
       summary: ProxyLogsResponse["summary"];
       sites: Array<{ id: number; name: string; status?: string | null }>;
     }>;
+  },
+  getProxyLogsWindow: (
+    params?: Omit<ProxyLogsQuery, "limit" | "offset"> & {
+      bucketCount?: number;
+    },
+  ) =>
+    request(
+      `/api/stats/proxy-logs${buildQueryString({
+        ...params,
+        view: "window",
+      })}`,
+    ) as Promise<{
+      bucketDurationMs: number;
+      peakQps: number;
+      buckets: Array<{
+        requestCount: number;
+        successCount: number;
+        failedCount: number;
+        businessLimitCount: number;
+        totalTokens: number;
+      }>;
+    }>,
+  getDashboardWindowMetrics: async (params?: {
+    siteIds?: number[];
+    windowMinutes?: number;
+  }) => {
+    const windowMinutes = Math.max(
+      1,
+      Math.min(60, Math.trunc(params?.windowMinutes || 1)),
+    );
+    const to = new Date();
+    const from = new Date(to.getTime() - windowMinutes * 60_000);
+    const hasSiteScope = Array.isArray(params?.siteIds);
+    const siteIds = hasSiteScope ? params.siteIds || [] : [undefined];
+    if (hasSiteScope && siteIds.length === 0) {
+      return {
+        windowMinutes,
+        totalCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        businessLimitCount: 0,
+        totalCost: 0,
+        totalTokensAll: 0,
+        averageLatencyMs: null,
+        averageFirstByteLatencyMs: null,
+        peakQps: 0,
+        buckets: Array.from({ length: 20 }, () => ({
+          requestCount: 0,
+          successCount: 0,
+          failedCount: 0,
+          businessLimitCount: 0,
+          totalTokens: 0,
+        })),
+      };
+    }
+    const [summaries, windows] = await Promise.all([
+      Promise.all(
+        siteIds.map((siteId) =>
+          api.getProxyLogsMeta({
+            siteId,
+            from: from.toISOString(),
+            to: to.toISOString(),
+          }),
+        ),
+      ),
+      Promise.all(
+        siteIds.map((siteId) =>
+          api.getProxyLogsWindow({
+            siteId,
+            from: from.toISOString(),
+            to: to.toISOString(),
+            bucketCount: 20,
+          }),
+        ),
+      ),
+    ]);
+    const summary = summaries.reduce(
+      (total, current) => ({
+        totalCount: total.totalCount + current.summary.totalCount,
+        successCount: total.successCount + current.summary.successCount,
+        failedCount: total.failedCount + current.summary.failedCount,
+        totalCost: total.totalCost + current.summary.totalCost,
+        totalTokensAll: total.totalTokensAll + current.summary.totalTokensAll,
+        businessLimitCount:
+          total.businessLimitCount + (current.summary.businessLimitCount || 0),
+        latencyWeight:
+          total.latencyWeight +
+          (current.summary.averageLatencyMs || 0) * current.summary.totalCount,
+        firstByteLatencyWeight:
+          total.firstByteLatencyWeight +
+          (current.summary.averageFirstByteLatencyMs || 0) *
+            current.summary.totalCount,
+      }),
+      {
+        totalCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        totalCost: 0,
+        totalTokensAll: 0,
+        businessLimitCount: 0,
+        latencyWeight: 0,
+        firstByteLatencyWeight: 0,
+      },
+    );
+    const buckets = Array.from({ length: 20 }, (_, index) =>
+      windows.reduce(
+        (bucket, current) => {
+          const source = current.buckets[index];
+          if (!source) return bucket;
+          return {
+            requestCount: bucket.requestCount + source.requestCount,
+            successCount: bucket.successCount + source.successCount,
+            failedCount: bucket.failedCount + source.failedCount,
+            businessLimitCount:
+              bucket.businessLimitCount + source.businessLimitCount,
+            totalTokens: bucket.totalTokens + source.totalTokens,
+          };
+        },
+        {
+          requestCount: 0,
+          successCount: 0,
+          failedCount: 0,
+          businessLimitCount: 0,
+          totalTokens: 0,
+        },
+      ),
+    );
+    const bucketSeconds = (windowMinutes * 60) / 20;
+    return {
+      windowMinutes,
+      totalCount: summary.totalCount,
+      successCount: summary.successCount,
+      failedCount: summary.failedCount,
+      totalCost: summary.totalCost,
+      totalTokensAll: summary.totalTokensAll,
+      businessLimitCount: summary.businessLimitCount,
+      averageLatencyMs: summary.totalCount
+        ? Math.round(summary.latencyWeight / summary.totalCount)
+        : null,
+      averageFirstByteLatencyMs: summary.totalCount
+        ? Math.round(summary.firstByteLatencyWeight / summary.totalCount)
+        : null,
+      peakQps: Math.max(
+        0,
+        ...buckets.map((bucket) => bucket.requestCount / bucketSeconds),
+      ),
+      buckets,
+    };
   },
   getProxyLogDetail: (id: number) =>
     request(`/api/stats/proxy-logs/${id}`) as Promise<ProxyLogDetail>,

@@ -61,10 +61,16 @@ function normalizeDashboardView(raw?: string) {
 
 function normalizeProxyLogsView(raw?: string) {
   const normalized = (raw || "").trim().toLowerCase();
-  if (normalized === "query" || normalized === "meta") {
+  if (normalized === "query" || normalized === "meta" || normalized === "window") {
     return normalized;
   }
   return "full";
+}
+
+function normalizeProxyLogBucketCount(raw?: string): number {
+  const parsed = Number.parseInt(raw || "20", 10);
+  if (!Number.isFinite(parsed)) return 20;
+  return Math.max(6, Math.min(60, parsed));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -858,8 +864,11 @@ export async function statsRoutes(app: FastifyInstance) {
             totalCount: sql<number>`count(*)`,
             successCount: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
             failedCount: sql<number>`coalesce(sum(case when coalesce(${schema.proxyLogs.status}, '') <> 'success' then 1 else 0 end), 0)`,
+            businessLimitCount: sql<number>`coalesce(sum(case when ${schema.proxyLogs.httpStatus} in (429, 529) then 1 else 0 end), 0)`,
             totalCost: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.estimatedCost}, 0)), 0)`,
             totalTokensAll: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
+            averageLatencyMs: sql<number | null>`avg(nullif(${schema.proxyLogs.latencyMs}, 0))`,
+            averageFirstByteLatencyMs: sql<number | null>`avg(nullif(${schema.proxyLogs.firstByteLatencyMs}, 0))`,
           })
           .from(schema.proxyLogs)
           .leftJoin(
@@ -897,10 +906,106 @@ export async function statsRoutes(app: FastifyInstance) {
         totalCount: Number(summaryRow?.totalCount || 0),
         successCount: Number(summaryRow?.successCount || 0),
         failedCount: Number(summaryRow?.failedCount || 0),
+        businessLimitCount: Number(summaryRow?.businessLimitCount || 0),
         totalCost: toRoundedMicroNumber(summaryRow?.totalCost),
         totalTokensAll: Number(summaryRow?.totalTokensAll || 0),
+        averageLatencyMs:
+          summaryRow?.averageLatencyMs == null
+            ? null
+            : Math.round(Number(summaryRow.averageLatencyMs)),
+        averageFirstByteLatencyMs:
+          summaryRow?.averageFirstByteLatencyMs == null
+            ? null
+            : Math.round(Number(summaryRow.averageFirstByteLatencyMs)),
       },
       sites: siteRows,
+    };
+  }
+
+  async function loadProxyLogsWindowPayload(params: {
+    status?: string;
+    search?: string;
+    client?: string;
+    siteId?: string;
+    from?: string;
+    to?: string;
+    bucketCount?: string;
+  }) {
+    const status = normalizeProxyLogStatusFilter(params.status);
+    const search = normalizeProxyLogSearch(params.search);
+    const client = normalizeProxyLogClientFilter(params.client);
+    const siteId = normalizeProxyLogSiteId(params.siteId);
+    const fromUtc = normalizeProxyLogTimeBoundary(params.from);
+    const toUtc = normalizeProxyLogTimeBoundary(params.to);
+    const fromDate = fromUtc ? parseStoredUtcDateTime(fromUtc) : null;
+    const toDate = toUtc ? parseStoredUtcDateTime(toUtc) : null;
+    const endMs = toDate?.getTime() ?? Date.now();
+    const startMs = fromDate?.getTime() ?? endMs - 60_000;
+    const rangeMs = Math.max(1, endMs - startMs);
+    const bucketCount = normalizeProxyLogBucketCount(params.bucketCount);
+    const bucketDurationMs = rangeMs / bucketCount;
+    const where = buildProxyLogWhereClause({
+      status,
+      search,
+      client,
+      siteId,
+      fromUtc,
+      toUtc,
+    });
+
+    let query = db
+      .select({
+        createdAt: schema.proxyLogs.createdAt,
+        status: schema.proxyLogs.status,
+        httpStatus: schema.proxyLogs.httpStatus,
+        totalTokens: schema.proxyLogs.totalTokens,
+      })
+      .from(schema.proxyLogs)
+      .leftJoin(schema.accounts, eq(schema.proxyLogs.accountId, schema.accounts.id))
+      .leftJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
+      .leftJoin(
+        schema.downstreamApiKeys,
+        eq(schema.proxyLogs.downstreamApiKeyId, schema.downstreamApiKeys.id),
+      );
+    if (where) query = query.where(where) as typeof query;
+
+    const buckets = Array.from({ length: bucketCount }, () => ({
+      requestCount: 0,
+      successCount: 0,
+      failedCount: 0,
+      businessLimitCount: 0,
+      totalTokens: 0,
+    }));
+    for (const row of await query.all()) {
+      const createdAtMs = parseStoredUtcDateTime(row.createdAt)?.getTime();
+      if (createdAtMs == null || createdAtMs < startMs || createdAtMs >= endMs) {
+        continue;
+      }
+      const bucketIndex = Math.min(
+        bucketCount - 1,
+        Math.floor((createdAtMs - startMs) / bucketDurationMs),
+      );
+      const bucket = buckets[bucketIndex];
+      bucket.requestCount += 1;
+      if ((row.status || "").trim().toLowerCase() === "success") {
+        bucket.successCount += 1;
+      } else {
+        bucket.failedCount += 1;
+      }
+      if (row.httpStatus === 429 || row.httpStatus === 529) {
+        bucket.businessLimitCount += 1;
+      }
+      bucket.totalTokens += Number(row.totalTokens || 0);
+    }
+
+    const bucketSeconds = bucketDurationMs / 1000;
+    return {
+      bucketDurationMs: Math.round(bucketDurationMs),
+      peakQps: Math.max(
+        0,
+        ...buckets.map((bucket) => bucket.requestCount / bucketSeconds),
+      ),
+      buckets,
     };
   }
 
@@ -915,6 +1020,7 @@ export async function statsRoutes(app: FastifyInstance) {
       siteId?: string;
       from?: string;
       to?: string;
+      bucketCount?: string;
       view?: string;
     };
   }>("/api/stats/proxy-logs", async (request, reply) => {
@@ -924,6 +1030,9 @@ export async function statsRoutes(app: FastifyInstance) {
     }
     if (view === "meta") {
       return loadProxyLogsMetaPayload(request.query);
+    }
+    if (view === "window") {
+      return loadProxyLogsWindowPayload(request.query);
     }
     const [queryPayload, metaPayload] = await Promise.all([
       loadProxyLogsQueryPayload(request.query),
