@@ -1,3 +1,4 @@
+import { logOperationalEvent } from '../shared/operationalLog.js';
 import {
   db,
   schema,
@@ -257,6 +258,13 @@ export function isMissingProxyLogStreamTimingColumnsError(error: unknown): boole
 }
 
 export async function insertProxyLog(input: ProxyLogInsertInput): Promise<void> {
+  if (input.status === 'failed' || (input.retryCount ?? 0) > 0) {
+    logOperationalEvent(input.status === 'failed' ? 'warn' : 'info', 'proxy.request_result', {
+      routeId: input.routeId, channelId: input.channelId, accountId: input.accountId,
+      status: input.status, statusCode: input.httpStatus, isStream: input.isStream,
+      durationMs: input.latencyMs, retryCount: input.retryCount,
+    });
+  }
   const baseValues = {
     routeId: input.routeId ?? null,
     channelId: input.channelId ?? null,

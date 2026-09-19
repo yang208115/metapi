@@ -1,3 +1,4 @@
+import { logOperation, logOperationalEvent } from '../shared/operationalLog.js';
 import { and, eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db, schema } from '../db/index.js';
@@ -338,6 +339,15 @@ function buildSuccessfulRefreshResult(input: {
 }
 
 export async function refreshModelsForAccount(
+  accountId: number,
+  options?: { allowInactive?: boolean },
+): Promise<ModelRefreshResult> {
+  return logOperation('models.refresh', { accountId }, () => refreshModelsForAccountInternal(accountId, options), (result) => ({
+    status: result.status, errorCode: result.errorCode, modelCount: result.modelCount,
+  }));
+}
+
+async function refreshModelsForAccountInternal(
   accountId: number,
   options?: { allowInactive?: boolean },
 ): Promise<ModelRefreshResult> {
@@ -1023,6 +1033,10 @@ async function refreshModelsForAllActiveAccounts(): Promise<ModelRefreshResult[]
 export async function rebuildTokenRoutesFromAvailability(
   options: RebuildTokenRoutesOptions = {},
 ) {
+  return logOperation('routes.rebuild', {}, () => rebuildTokenRoutesFromAvailabilityInternal(options), (result) => result);
+}
+
+async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenRoutesOptions) {
   const tokenRows = await db.select().from(schema.tokenModelAvailability)
     .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
     .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
@@ -1314,6 +1328,7 @@ async function runRefreshModelsAndRebuildRoutes(options: RebuildTokenRoutesOptio
 
 export async function refreshModelsAndRebuildRoutes(options: RebuildTokenRoutesOptions = {}) {
   if (inFlightRefreshModelsAndRebuildRoutes) {
+    logOperationalEvent('info', 'models.refresh_reused');
     return inFlightRefreshModelsAndRebuildRoutes;
   }
 

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { logOperationalEvent, operationalErrorFields } from '../../shared/operationalLog.js';
 import { fetch } from 'undici';
 import { readRuntimeResponseText } from '../executors/types.js';
 import { fetchWithObservedFirstByte, isObservedFirstByteTimeoutResponse } from '../firstByteTimeout.js';
@@ -94,13 +96,15 @@ async function runEndpointFlowHook<T>(
   try {
     await hook(ctx);
   } catch (error) {
-    console.error(`endpointFlow ${hookName} hook failed`, error);
+    logOperationalEvent('error', 'proxy.hook_failed', { hook: hookName, ...operationalErrorFields(error) });
   }
 }
 
 export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Promise<EndpointFlowResult> {
+  const flowId = randomUUID();
   const endpointCount = input.endpointCandidates.length;
   if (endpointCount <= 0) {
+    logOperationalEvent('warn', 'proxy.no_endpoints', { flowId });
     return {
       ok: false,
       status: 502,
@@ -120,6 +124,7 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
       ? buildUpstreamUrl(input.proxyUrl, request.path)
       : defaultTarget;
 
+    const attemptContext = { flowId, endpoint, attempt: endpointIndex + 1, endpointCount };
     const attemptStartedAtMs = Date.now();
     let response = await fetchWithObservedFirstByte(
       async (signal) => (
@@ -136,9 +141,19 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
         firstByteTimeoutMs: input.firstByteTimeoutMs,
         startedAtMs: attemptStartedAtMs,
       },
-    );
+    ).catch((error: unknown) => {
+      logOperationalEvent('error', 'proxy.dispatch_failed', {
+        ...attemptContext, ...operationalErrorFields(error), durationMs: Date.now() - attemptStartedAtMs,
+      });
+      throw error;
+    });
 
     if (response.ok) {
+      if (endpointIndex > 0) {
+        logOperationalEvent('info', 'proxy.fallback_succeeded', {
+          ...attemptContext, statusCode: response.status, durationMs: Date.now() - attemptStartedAtMs,
+        });
+      }
       await runEndpointFlowHook(input.onAttemptSuccess, {
         endpointIndex,
         endpointCount,
@@ -154,7 +169,14 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
       };
     }
 
-    let rawErrText = await readRuntimeResponseText(response).catch(() => 'unknown error');
+    logOperationalEvent('warn', 'proxy.attempt_rejected', {
+      ...attemptContext, statusCode: response.status, durationMs: Date.now() - attemptStartedAtMs,
+      firstByteTimeout: isObservedFirstByteTimeoutResponse(response),
+    });
+    let rawErrText = await readRuntimeResponseText(response).catch((error: unknown) => {
+      logOperationalEvent('warn', 'proxy.error_body_read_failed', { ...attemptContext, ...operationalErrorFields(error) });
+      return 'unknown error';
+    });
     const baseContext: EndpointAttemptContext = {
       endpointIndex,
       endpointCount,
@@ -179,16 +201,21 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
       if (input.disableCrossProtocolFallback) {
         break;
       }
+      logOperationalEvent('warn', 'proxy.endpoint_fallback', { ...attemptContext, reason: 'first_byte_timeout' });
       continue;
     }
 
     if (input.tryRecover) {
-      const recovered = await input.tryRecover(baseContext);
+      const recovered = await input.tryRecover(baseContext).catch((error: unknown) => {
+        logOperationalEvent('error', 'proxy.recovery_failed', { ...attemptContext, ...operationalErrorFields(error) });
+        throw error;
+      });
       baseContext.recoverApplied = recovered !== null
         || baseContext.request !== request
         || baseContext.response !== response
         || baseContext.rawErrText !== rawErrText;
       if (recovered?.upstream?.ok) {
+        logOperationalEvent('info', 'proxy.recovered', { ...attemptContext, statusCode: recovered.upstream.status });
         const recoveredRequest = recovered.request ?? baseContext.request;
         const recoveredTargetUrl = recovered.targetUrl ?? (
           input.proxyUrl
@@ -240,6 +267,7 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
     }
     const shouldDowngrade = !isLastEndpoint && !!input.shouldDowngrade?.(baseContext);
     if (shouldDowngrade) {
+      logOperationalEvent('warn', 'proxy.endpoint_fallback', { ...attemptContext, reason: 'protocol_downgrade', statusCode: response.status });
       await runEndpointFlowHook(input.onDowngrade, {
         ...baseContext,
         errText,
@@ -253,6 +281,7 @@ export async function executeEndpointFlow(input: ExecuteEndpointFlowInput): Prom
     break;
   }
 
+  logOperationalEvent('error', 'proxy.endpoints_failed', { flowId, statusCode: finalStatus || 502 });
   return {
     ok: false,
     status: finalStatus || 502,

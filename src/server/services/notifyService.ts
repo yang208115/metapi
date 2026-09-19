@@ -1,3 +1,4 @@
+import { logOperation } from '../shared/operationalLog.js';
 import { fetch } from 'undici';
 import { config } from '../config.js';
 import { withExplicitProxyRequestInit } from './siteProxy.js';
@@ -337,7 +338,7 @@ export async function sendNotification(
 
   const results = await Promise.all(tasks.map(async (task) => {
     try {
-      await task.run();
+      await logOperation('notification.dispatch', { channel: task.channel }, task.run);
       return { channel: task.channel, ok: true as const, error: '' };
     } catch (error: any) {
       return {

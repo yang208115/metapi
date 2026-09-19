@@ -1,3 +1,4 @@
+import { logOperation, logOperationalEvent, operationalErrorFields } from '../shared/operationalLog.js';
 import { randomUUID } from 'node:crypto';
 import { sendNotification } from './notifyService.js';
 
@@ -163,7 +164,7 @@ async function runTask(taskId: string, options: BackgroundTaskStartOptions, runn
   });
 
   try {
-    const result = await runner();
+    const result = await logOperation('task.run', { taskId, taskType: options.type }, runner);
     task = setTaskStatus(task, {
       status: 'succeeded',
       finishedAt: nowIso(),
@@ -231,6 +232,7 @@ export function startBackgroundTask(
     if (existingTaskId) {
       const existing = tasks.get(existingTaskId);
       if (existing && (existing.status === 'pending' || existing.status === 'running')) {
+        logOperationalEvent('info', 'task.reused', { taskId: existing.id, taskType: existing.type });
         return { task: existing, reused: true };
       }
       dedupeTaskIds.delete(dedupeKey);
@@ -259,7 +261,10 @@ export function startBackgroundTask(
   taskLogSeq.set(task.id, 0);
   if (dedupeKey) dedupeTaskIds.set(dedupeKey, task.id);
 
-  void runTask(task.id, options, runner);
+  logOperationalEvent('info', 'task.queued', { taskId: task.id, taskType: task.type });
+  void runTask(task.id, options, runner).catch((error) => {
+    logOperationalEvent('error', 'task.dispatch_failed', { taskId: task.id, taskType: task.type, ...operationalErrorFields(error) });
+  });
   return { task, reused: false };
 }
 

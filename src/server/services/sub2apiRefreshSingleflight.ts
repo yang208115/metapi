@@ -1,3 +1,4 @@
+import { logOperation } from '../shared/operationalLog.js';
 import type { schema } from '../db/index.js';
 import { refreshSub2ApiManagedSession } from './sub2apiManagedAuth.js';
 
@@ -16,7 +17,9 @@ export async function refreshSub2ApiManagedSessionSingleflight(params: RefreshPa
     return existing;
   }
 
-  const promise = refreshSub2ApiManagedSession(params).finally(() => {
+  const promise = logOperation('session.refresh', {
+    accountId: params.account.id, siteId: params.site.id,
+  }, () => refreshSub2ApiManagedSession(params)).finally(() => {
     refreshInFlight.delete(params.account.id);
   });
   refreshInFlight.set(params.account.id, promise);

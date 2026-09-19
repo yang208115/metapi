@@ -17,6 +17,7 @@ import { searchRoutes } from './routes/api/search.js';
 import { taskRoutes } from './routes/api/tasks.js';
 import { testRoutes } from './routes/api/test.js';
 import { downstreamApiKeysRoutes } from './routes/api/downstreamApiKeys.js';
+import { terminalLogsRoutes } from './routes/api/terminalLogs.js';
 import { proxyRoutes } from './routes/proxy/router.js';
 import * as routeRefreshWorkflow from './services/routeRefreshWorkflow.js';
 import { startProxyFileRetentionService, stopProxyFileRetentionService } from './services/proxyFileRetentionService.js';
@@ -40,6 +41,11 @@ import {
 } from './runtimeSettingsHydration.js';
 import { normalizeLogCleanupRetentionDays } from './shared/logCleanupRetentionDays.js';
 import { startLogCleanupScheduler, stopLogCleanupScheduler } from './services/logCleanupScheduler.js';
+import {
+  createTerminalLogStream,
+  installConsoleLogCapture,
+  recordTerminalHttpError,
+} from './services/terminalLogService.js';
 import {
   db,
   ensureProxyFileCompatibilityColumns,
@@ -102,6 +108,8 @@ const LOG_CLEANUP_SETTING_KEYS = [
 function hasExplicitLogCleanupSettings(settingsMap: Map<string, string>): boolean {
   return LOG_CLEANUP_SETTING_KEYS.some((key) => settingsMap.has(key));
 }
+
+installConsoleLogCapture();
 
 // Ensure the current runtime database is bootstrapped before reading settings.
 await ensureRuntimeDatabaseReady({
@@ -166,7 +174,19 @@ try {
   console.warn(`Failed to load runtime settings overrides: ${(error as Error)?.message || 'unknown error'}`);
 }
 
-const app = Fastify(buildFastifyOptions(config));
+const app = Fastify(buildFastifyOptions(config, createTerminalLogStream()));
+
+app.addHook('onSend', async (request, reply, payload) => {
+  if (reply.statusCode >= 400) {
+    recordTerminalHttpError({
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      payload,
+    });
+  }
+  return payload;
+});
 
 await app.register(cors);
 
@@ -189,6 +209,7 @@ await app.register(searchRoutes);
 await app.register(taskRoutes);
 await app.register(testRoutes);
 await app.register(downstreamApiKeysRoutes);
+await app.register(terminalLogsRoutes);
 
 // Register OpenAI-compatible proxy routes
 await app.register(proxyRoutes);

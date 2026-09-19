@@ -1,3 +1,4 @@
+import { logOperationalEvent, operationalErrorFields } from '../shared/operationalLog.js';
 import { and, asc, eq, gt, gte, isNull, lte, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -846,7 +847,17 @@ export async function runUsageAggregationProjectionPass(
     return projectionInFlight;
   }
 
-  projectionInFlight = runUsageAggregationProjectionPassImpl(options).finally(() => {
+  projectionInFlight = runUsageAggregationProjectionPassImpl(options).then((result) => {
+    if (result.processedLogs > 0 || result.recomputed) {
+      logOperationalEvent('info', 'usage.projection_completed', {
+        processedLogs: result.processedLogs, watermarkId: result.watermarkId, recomputed: result.recomputed,
+      });
+    }
+    return result;
+  }).catch((error: unknown) => {
+    logOperationalEvent('error', 'usage.projection_failed', operationalErrorFields(error));
+    throw error;
+  }).finally(() => {
     projectionInFlight = null;
   });
   return projectionInFlight;
@@ -872,9 +883,11 @@ export async function requestUsageAggregatesRecompute(fromLogId = 1): Promise<vo
 
 export function startUsageAggregationProjectorScheduler() {
   if (projectionTimer) return;
-  void runUsageAggregationProjectionPass();
+  // The pass logs failures; scheduled runs have no caller to handle rejection.
+  void runUsageAggregationProjectionPass().catch(() => {});
+  logOperationalEvent('info', 'usage.scheduler_started', { intervalMs: PROJECTION_INTERVAL_MS });
   projectionTimer = setInterval(() => {
-    void runUsageAggregationProjectionPass();
+    void runUsageAggregationProjectionPass().catch(() => {});
   }, PROJECTION_INTERVAL_MS);
 }
 

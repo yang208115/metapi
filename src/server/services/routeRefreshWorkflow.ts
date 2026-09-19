@@ -1,3 +1,4 @@
+import { logOperationalEvent, operationalErrorFields } from '../shared/operationalLog.js';
 import { startBackgroundTask } from './backgroundTaskService.js';
 import {
   rebuildTokenRoutesFromAvailability,
@@ -13,7 +14,8 @@ export async function rebuildRoutesBestEffort() {
   try {
     await rebuildRoutesOnly();
     return true;
-  } catch {
+  } catch (error) {
+    logOperationalEvent('warn', 'routes.rebuild_best_effort_failed', operationalErrorFields(error));
     return false;
   }
 }

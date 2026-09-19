@@ -627,45 +627,46 @@ export default function Dashboard({
       ? activeAccounts
       : scopedAccounts.filter((account) => account.status === "active").length;
   const scopedTotalAccounts = scopedAccounts == null ? totalAccounts : scopedAccounts.length;
-  const scopedRequestTotal = runtimeMetrics?.totalCount ?? proxy24hTotal;
-  const scopedSuccessCount = runtimeMetrics?.successCount ?? proxy24hSuccess;
-  const scopedFailedCount = runtimeMetrics?.failedCount ?? proxy24hFailed;
-  const scopedBusinessLimit =
-    runtimeMetrics?.businessLimitCount ?? proxy24hBusinessLimit;
-  const scopedTokens = runtimeMetrics?.totalTokensAll ?? totalTokens;
-  const scopedWindowMinutes = runtimeMetrics?.windowMinutes ?? 1;
-  const scopedQps = runtimeMetrics
-    ? scopedRequestTotal / (scopedWindowMinutes * 60)
+  const liveRequestTotal = runtimeMetrics?.totalCount ?? 0;
+  const liveTokens = runtimeMetrics?.totalTokensAll ?? 0;
+  const liveWindowMinutes = runtimeMetrics?.windowMinutes ?? liveWindow;
+  const liveQps = runtimeMetrics
+    ? liveRequestTotal / (liveWindowMinutes * 60)
     : requestsPerMinute / 60;
-  const scopedTps = runtimeMetrics
-    ? scopedTokens / (scopedWindowMinutes * 60)
+  const liveTps = runtimeMetrics
+    ? liveTokens / (liveWindowMinutes * 60)
     : tokensPerMinute / 60;
-  const scopedPeakQps = runtimeMetrics?.peakQps ?? 0;
+  const livePeakQps = runtimeMetrics?.peakQps ?? 0;
   const liveChartBuckets = runtimeMetrics?.buckets || [];
   const liveChartMaxQps = Math.max(
-    scopedPeakQps,
+    livePeakQps,
     ...liveChartBuckets.map((bucket) =>
-      bucket.requestCount / Math.max(1, (scopedWindowMinutes * 60) / 20),
+      bucket.requestCount / Math.max(1, (liveWindowMinutes * 60) / 20),
     ),
     0.1,
   );
+  const historyRequestTotal = proxy24hTotal;
+  const historySuccessCount = proxy24hSuccess;
+  const historyFailedCount = proxy24hFailed;
+  const historyBusinessLimit = proxy24hBusinessLimit;
+  const historyTokens = totalTokens;
   const proxySuccessRate =
-    scopedRequestTotal > 0
-      ? (scopedSuccessCount / scopedRequestTotal) * 100
+    historyRequestTotal > 0
+      ? (historySuccessCount / historyRequestTotal) * 100
       : null;
   const proxyErrorRate =
     proxySuccessRate == null ? null : 100 - proxySuccessRate;
-  const slaRequestTotal = Math.max(0, scopedRequestTotal - scopedBusinessLimit);
-  const slaFailedCount = Math.max(0, scopedFailedCount - scopedBusinessLimit);
+  const slaRequestTotal = Math.max(0, historyRequestTotal - historyBusinessLimit);
+  const slaFailedCount = Math.max(0, historyFailedCount - historyBusinessLimit);
   const slaSuccessRate =
     slaRequestTotal > 0
       ? ((slaRequestTotal - slaFailedCount) / slaRequestTotal) * 100
       : null;
-  const upstreamFailedCount = Math.max(0, scopedFailedCount - scopedBusinessLimit);
+  const upstreamFailedCount = Math.max(0, historyFailedCount - historyBusinessLimit);
   const upstreamErrorRate =
     slaRequestTotal > 0 ? (upstreamFailedCount / slaRequestTotal) * 100 : null;
-  const averageQps = scopedQps;
-  const averageTps = scopedTps;
+  const averageQps = liveQps;
+  const averageTps = liveTps;
   const healthPercent =
     scopedTotalAccounts > 0
       ? Math.round((scopedActiveAccounts / scopedTotalAccounts) * 100)
@@ -692,8 +693,7 @@ export default function Dashboard({
   );
   const modelAverageLatencyMs =
     rankedCalls > 0 ? Math.round(weightedLatency / rankedCalls) : null;
-  const averageLatencyMs =
-    runtimeMetrics?.averageLatencyMs ?? modelAverageLatencyMs;
+  const averageLatencyMs = modelAverageLatencyMs;
   const ttftMs = runtimeMetrics?.averageFirstByteLatencyMs ?? null;
   const refreshLabel = data?.generatedAt
     ? new Date(data.generatedAt).toLocaleTimeString([], {
@@ -702,7 +702,7 @@ export default function Dashboard({
         second: "2-digit",
       })
     : "—";
-  const metricsScopeLabel = runtimeMetrics ? "当前窗口" : "最近 24h";
+  const metricsScopeLabel = "最近 24h";
 
   const getLatencyColor = (ms: number) =>
     ms <= 500
@@ -956,14 +956,14 @@ export default function Dashboard({
               <div>
                 <span>峰值</span>
                 <strong>
-                  {scopedPeakQps.toFixed(1)}{" "}
+                  {livePeakQps.toFixed(1)}{" "}
                   <small>QPS</small>
                 </strong>
               </div>
               <div>
                 <span className="ops-kpi-spacer">&nbsp;</span>
                 <strong>
-                  {formatCompactTokenMetric(scopedTokens)} <small>Tokens</small>
+                  {formatCompactTokenMetric(liveTokens)} <small>Tokens</small>
                 </strong>
               </div>
             </div>
@@ -971,7 +971,7 @@ export default function Dashboard({
               {liveChartBuckets.map((bucket, index) => {
                 const bucketQps =
                   bucket.requestCount /
-                  Math.max(1, (scopedWindowMinutes * 60) / 20);
+                  Math.max(1, (liveWindowMinutes * 60) / 20);
                 const height = bucket.requestCount
                   ? Math.max(8, (bucketQps / liveChartMaxQps) * 100)
                   : 4;
@@ -1001,18 +1001,18 @@ export default function Dashboard({
           </div>
           <div className="ops-metric-line">
             <span>请求数</span>
-            <strong>{Math.round(scopedRequestTotal).toLocaleString()}</strong>
+            <strong>{Math.round(historyRequestTotal).toLocaleString()}</strong>
           </div>
           <div className="ops-metric-line">
             <span>Token 数</span>
-            <strong>{formatCompactTokenMetric(scopedTokens)}</strong>
+            <strong>{formatCompactTokenMetric(historyTokens)}</strong>
           </div>
           <div className="ops-metric-subgrid">
             <span>
-              平均 QPS <b>{averageQps.toFixed(1)}</b>
+              当前 QPS <b>{averageQps.toFixed(1)}</b>
             </span>
             <span>
-              平均 TPS <b>{averageTps.toFixed(1)}</b>
+              当前 TPS <b>{averageTps.toFixed(1)}</b>
             </span>
           </div>
         </article>
@@ -1068,11 +1068,11 @@ export default function Dashboard({
           </div>
           <div className="ops-metric-footer">
             <span>错误数</span>
-            <strong>{Math.round(scopedFailedCount).toLocaleString()}</strong>
+            <strong>{Math.round(historyFailedCount).toLocaleString()}</strong>
           </div>
           <div className="ops-metric-footer">
             <span>业务限制</span>
-            <strong>{Math.round(scopedBusinessLimit).toLocaleString()}</strong>
+            <strong>{Math.round(historyBusinessLimit).toLocaleString()}</strong>
           </div>
         </article>
 
@@ -1156,7 +1156,7 @@ export default function Dashboard({
           </div>
           <div className="ops-metric-footer">
             <span>429/529</span>
-            <strong>{Math.round(scopedBusinessLimit).toLocaleString()}</strong>
+            <strong>{Math.round(historyBusinessLimit).toLocaleString()}</strong>
           </div>
         </article>
       </section>
@@ -1182,14 +1182,14 @@ export default function Dashboard({
           <span className="ops-resource-label">
             24h 请求 <span className="ops-info-icon">ⓘ</span>
           </span>
-            <strong>{Math.round(scopedRequestTotal).toLocaleString()}</strong>
-            <small>{Math.round(scopedSuccessCount).toLocaleString()} 次成功</small>
+            <strong>{Math.round(historyRequestTotal).toLocaleString()}</strong>
+            <small>{Math.round(historySuccessCount).toLocaleString()} 次成功</small>
         </div>
         <div>
           <span className="ops-resource-label">
             24h Tokens <span className="ops-info-icon">ⓘ</span>
           </span>
-          <strong>{formatCompactTokenMetric(scopedTokens)}</strong>
+          <strong>{formatCompactTokenMetric(historyTokens)}</strong>
           <small>累计处理量</small>
         </div>
         <div>

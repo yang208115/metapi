@@ -1,3 +1,4 @@
+import { logOperation } from '../../shared/operationalLog.js';
 import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db, schema } from '../../db/index.js';
 import { insertAndGetById } from '../../db/insertHelpers.js';
@@ -1197,6 +1198,10 @@ export function buildCodexOauthProviderHeaders(input: {
 }
 
 export async function refreshOauthAccessToken(accountId: number) {
+  return logOperation('oauth.token_refresh', { accountId }, () => refreshOauthAccessTokenInternal(accountId));
+}
+
+async function refreshOauthAccessTokenInternal(accountId: number) {
   const account = await db.select().from(schema.accounts)
     .where(eq(schema.accounts.id, accountId))
     .get();

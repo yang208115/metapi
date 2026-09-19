@@ -97,9 +97,11 @@ async function fetchAuthenticatedResponse(
     ...fetchOptions
   } = options;
   const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = timeoutMs > 0
+    ? setTimeout(() => {
+        controller.abort();
+      }, timeoutMs)
+    : null;
   let cleanupExternalSignal = () => {};
 
   if (externalSignal) {
@@ -172,7 +174,9 @@ async function streamSse(
   handlers: {
     onLog?: (entry: any) => void;
     onDone?: (payload: any) => void;
+    onOpen?: () => void;
     signal?: AbortSignal;
+    timeoutMs?: number;
   },
 ) {
   const response = await fetchAuthenticatedResponse(url, {
@@ -181,7 +185,7 @@ async function streamSse(
     headers: {
       Accept: "text/event-stream",
     },
-    timeoutMs: 120_000,
+    timeoutMs: handlers.timeoutMs ?? 120_000,
   });
 
   if (!response.ok) {
@@ -190,6 +194,7 @@ async function streamSse(
   if (!response.body) {
     throw new Error("响应未返回流式内容");
   }
+  handlers.onOpen?.();
 
   const decoder = new TextDecoder();
   const reader = response.body.getReader();
@@ -413,6 +418,14 @@ export type RuntimeSettingsPayload = {
 export type ProxyLogStatusFilter = "all" | "success" | "failed";
 export type ProxyLogClientConfidence = "exact" | "heuristic" | "unknown" | null;
 export type ProxyLogUsageSource = "upstream" | "self-log" | "unknown" | null;
+
+export type TerminalLogEntry = {
+  id: number;
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error";
+  source: "console" | "fastify";
+  message: string;
+};
 
 export type ProxyLogBillingDetails = {
   quotaType: number;
@@ -853,6 +866,23 @@ export const api = {
     }),
 
   // Stats
+  streamTerminalLogs: (handlers: {
+    onOpen?: () => void;
+    onLog: (entry: TerminalLogEntry) => void;
+    signal?: AbortSignal;
+    limit?: number;
+  }) =>
+    streamSse(
+      `/api/system/terminal-logs/stream${buildQueryString({
+        limit: handlers.limit ?? 300,
+      })}`,
+      {
+        onOpen: handlers.onOpen,
+        onLog: handlers.onLog,
+        signal: handlers.signal,
+        timeoutMs: 0,
+      },
+    ),
   getDashboard: () => request("/api/stats/dashboard"),
   getDashboardSnapshot: (options?: { refresh?: boolean }) =>
     request(

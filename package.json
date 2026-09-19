@@ -21,18 +21,18 @@
   },
   "license": "MIT",
   "engines": {
-    "node": ">=25.0.0"
+    "node": ">=22.0.0"
   },
   "type": "module",
   "scripts": {
     "dev:server": "tsx scripts/dev/run-server.ts --watch",
-    "dev": "concurrently \"pnpm run dev:server\" \"vite\"",
+    "dev": "concurrently \"npm run dev:server\" \"vite\"",
     "build:web": "vite build",
     "build:server": "tsc -p tsconfig.server.json && tsx scripts/dev/copy-runtime-db-generated.ts",
-    "build": "pnpm run build:web && pnpm run build:server",
+    "build": "npm run build:web && npm run build:server",
     "typecheck:web": "tsc -p tsconfig.web.json",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
-    "typecheck": "pnpm run typecheck:web && pnpm run typecheck:server",
+    "typecheck": "npm run typecheck:web && npm run typecheck:server",
     "docs:dev": "vitepress dev docs --host 0.0.0.0 --port 4173",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs --host 0.0.0.0 --port 4173",
@@ -40,7 +40,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/server/db/migrate.ts",
     "schema:contract": "tsx scripts/dev/generate-schema-contract.ts",
-    "schema:generate": "pnpm run db:generate && pnpm run schema:contract",
+    "schema:generate": "npm run db:generate && npm run schema:contract",
     "repo:drift-check": "tsx scripts/dev/repo-drift-check.ts",
     "readme:contributors": "tsx scripts/dev/update-readme-contributors.ts",
     "smoke:db": "tsx scripts/dev/db-smoke.ts",

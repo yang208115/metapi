@@ -1,3 +1,4 @@
+import { logOperation, logOperationalEvent, operationalErrorFields } from '../shared/operationalLog.js';
 import { db, schema } from '../db/index.js';
 import { getAdapter } from './platforms/index.js';
 import { eq } from 'drizzle-orm';
@@ -261,6 +262,13 @@ async function tryAutoRelogin(account: any, site: any): Promise<AutoReloginResul
 }
 
 export async function refreshBalance(accountId: number) {
+  return logOperation('balance.refresh', { accountId }, () => refreshBalanceInternal(accountId), (result) => ({
+    status: !result ? 'failed' : 'skipped' in result ? 'skipped' : 'succeeded',
+    reason: result && 'reason' in result ? result.reason : undefined,
+  }));
+}
+
+async function refreshBalanceInternal(accountId: number) {
   const rows = await db
     .select()
     .from(schema.accounts)
@@ -268,7 +276,10 @@ export async function refreshBalance(accountId: number) {
     .where(eq(schema.accounts.id, accountId))
     .all();
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    logOperationalEvent('warn', 'balance.account_missing', { accountId });
+    return null;
+  }
 
   const account = rows[0].accounts;
   const site = rows[0].sites;
@@ -289,7 +300,10 @@ export async function refreshBalance(accountId: number) {
   }
 
   const adapter = getAdapter(site.platform);
-  if (!adapter) return null;
+  if (!adapter) {
+    logOperationalEvent('warn', 'balance.adapter_unsupported', { accountId, siteId: site.id, platform: site.platform });
+    return null;
+  }
 
   if (isApiKeyConnection(account)) {
     return {
@@ -320,7 +334,9 @@ export async function refreshBalance(accountId: number) {
         });
         activeAccessToken = refreshed.accessToken;
         activeExtraConfig = refreshed.extraConfig;
-      } catch {}
+      } catch (error) {
+        logOperationalEvent('warn', 'balance.session_refresh_failed', { accountId, siteId: site.id, ...operationalErrorFields(error) });
+      }
     }
   }
   const readBalance = async (token: string) => withAccountProxyOverride(accountProxyUrl,
@@ -352,6 +368,10 @@ export async function refreshBalance(accountId: number) {
       && !!getSub2ApiAuthFromExtraConfig(activeExtraConfig)?.refreshToken
       && shouldAttemptAutoRelogin(message);
 
+    logOperationalEvent('warn', 'balance.read_failed', {
+      accountId, siteId: site.id, ...operationalErrorFields(err),
+      recovery: canTryManagedSub2ApiRefresh ? 'managed_session' : shouldAttemptAutoRelogin(message) ? 'relogin' : 'none',
+    });
     if (canTryManagedSub2ApiRefresh) {
       try {
         const refreshed = await refreshSub2ApiManagedSessionSingleflight({

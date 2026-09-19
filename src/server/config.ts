@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import type { FastifyServerOptions } from 'fastify';
+import type { Writable } from 'node:stream';
 import { normalizePayloadRulesConfig } from './services/payloadRules.js';
 
 const DEFAULT_REQUEST_BODY_LIMIT = 20 * 1024 * 1024;
@@ -164,9 +165,10 @@ export const config = buildConfig(process.env);
 
 export function buildFastifyOptions(
   appConfig: ReturnType<typeof buildConfig>,
+  loggerStream?: Writable,
 ): FastifyServerOptions {
   return {
-    logger: true,
+    logger: loggerStream ? { stream: loggerStream } : true,
     trustProxy: true,
     bodyLimit: appConfig.requestBodyLimit,
   };

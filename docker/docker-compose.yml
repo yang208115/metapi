@@ -2,7 +2,7 @@ services:
   metapi:
     image: 1467078763/metapi:latest
     ports:
-      - "127.0.0.1:${PORT:-4000}:${PORT:-4000}"
+      - "${PORT:-4000}:${PORT:-4000}"
     volumes:
       - ./data:/app/data
     environment:
