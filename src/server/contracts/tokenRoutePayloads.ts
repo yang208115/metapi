@@ -2,7 +2,6 @@ import { z } from 'zod';
 
 const routeChannelCreatePayloadSchema = z.object({
   accountId: z.number().int().positive(),
-  tokenId: z.union([z.number().int().positive(), z.null()]).optional(),
   sourceModel: z.string().optional(),
   priority: z.number().optional(),
   weight: z.number().optional(),
@@ -11,13 +10,11 @@ const routeChannelCreatePayloadSchema = z.object({
 const routeChannelBatchCreatePayloadSchema = z.object({
   channels: z.array(z.object({
     accountId: z.number().int().positive(),
-    tokenId: z.union([z.number().int().positive(), z.null()]).optional(),
     sourceModel: z.string().optional(),
   }).passthrough()).min(1),
 }).passthrough();
 
 const routeChannelUpdatePayloadSchema = z.object({
-  tokenId: z.union([z.number().int().positive(), z.null()]).optional(),
   sourceModel: z.union([z.string(), z.null()]).optional(),
   priority: z.number().optional(),
   weight: z.number().optional(),
@@ -107,9 +104,6 @@ function formatTokenRoutePayloadError(error: z.ZodError): string {
   if (firstPath === 'accountId') {
     return 'Invalid accountId. Expected positive number.';
   }
-  if (firstPath === 'tokenId') {
-    return 'Invalid tokenId. Expected positive number or null.';
-  }
   if (firstPath === 'sourceModel') {
     return 'Invalid sourceModel. Expected string or null.';
   }
@@ -127,9 +121,6 @@ function formatTokenRoutePayloadError(error: z.ZodError): string {
   }
   if (firstPath === 'channels' && thirdPath === 'accountId') {
     return 'Invalid channels[].accountId. Expected positive number.';
-  }
-  if (firstPath === 'channels' && thirdPath === 'tokenId') {
-    return 'Invalid channels[].tokenId. Expected positive number or null.';
   }
   if (firstPath === 'channels' && thirdPath === 'sourceModel') {
     return 'Invalid channels[].sourceModel. Expected string.';

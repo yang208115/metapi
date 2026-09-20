@@ -174,37 +174,7 @@ async function validatePolicyReferences(input: {
   }
 
   const credentialRefs = input.excludedCredentialRefs || [];
-  const accountTokenRefs = credentialRefs.filter((ref): ref is Extract<DownstreamExcludedCredentialRef, { kind: 'account_token' }> => ref.kind === 'account_token');
-  if (accountTokenRefs.length > 0) {
-    const tokenIds = Array.from(new Set(accountTokenRefs.map((ref) => ref.tokenId)));
-    const rows = await db.select({
-      tokenId: schema.accountTokens.id,
-      accountId: schema.accounts.id,
-      siteId: schema.accounts.siteId,
-    })
-      .from(schema.accountTokens)
-      .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-      .where(inArray(schema.accountTokens.id, tokenIds))
-      .all();
-    const tokenById = new Map<number, { tokenId: number; accountId: number; siteId: number }>(
-      rows.map((row) => [Number(row.tokenId), {
-        tokenId: Number(row.tokenId),
-        accountId: Number(row.accountId),
-        siteId: Number(row.siteId),
-      }]),
-    );
-    for (const ref of accountTokenRefs) {
-      const matched = tokenById.get(ref.tokenId);
-      if (!matched) {
-        return `excludedCredentialRefs 包含不存在的令牌: ${ref.tokenId}`;
-      }
-      if (Number(matched.accountId) !== ref.accountId || Number(matched.siteId) !== ref.siteId) {
-        return `excludedCredentialRefs 中的 account_token 引用与账号/站点不匹配: ${ref.tokenId}`;
-      }
-    }
-  }
-
-  const defaultApiKeyRefs = credentialRefs.filter((ref): ref is Extract<DownstreamExcludedCredentialRef, { kind: 'default_api_key' }> => ref.kind === 'default_api_key');
+  const defaultApiKeyRefs = credentialRefs;
   if (defaultApiKeyRefs.length > 0) {
     const accountIds = Array.from(new Set(defaultApiKeyRefs.map((ref) => ref.accountId)));
     const rows = await db.select({

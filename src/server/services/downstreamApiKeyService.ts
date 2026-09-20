@@ -221,9 +221,7 @@ export function normalizeExcludedSiteIdsInput(input: unknown): number[] {
 }
 
 function buildExcludedCredentialRefKey(ref: DownstreamExcludedCredentialRef): string {
-  return ref.kind === 'account_token'
-    ? `${ref.kind}:${ref.siteId}:${ref.accountId}:${ref.tokenId}`
-    : `${ref.kind}:${ref.siteId}:${ref.accountId}`;
+  return `${ref.kind}:${ref.siteId}:${ref.accountId}`;
 }
 
 function compareExcludedCredentialRefs(
@@ -254,16 +252,7 @@ export function normalizeExcludedCredentialRefsInput(input: unknown): Downstream
     }
 
     let normalizedRef: DownstreamExcludedCredentialRef | null = null;
-    if (kind === 'account_token') {
-      const tokenId = Math.trunc(Number((item as Record<string, unknown>).tokenId));
-      if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-      normalizedRef = {
-        kind: 'account_token',
-        siteId,
-        accountId,
-        tokenId,
-      };
-    } else if (kind === 'default_api_key') {
+    if (kind === 'account_token' || kind === 'default_api_key') {
       normalizedRef = {
         kind: 'default_api_key',
         siteId,

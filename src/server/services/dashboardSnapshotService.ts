@@ -19,7 +19,10 @@ import {
   toRoundedMicroNumber,
 } from "./statsShared.js";
 import { createAdminSnapshotPersistence } from "./adminSnapshotStore.js";
-import { runUsageAggregationProjectionPass } from "./usageAggregationService.js";
+import {
+  runUsageAggregationProjectionPass,
+  USAGE_AGGREGATE_COST_SEMANTICS_NOTE,
+} from "./usageAggregationService.js";
 
 export type DashboardSummaryPayload = {
   totalBalance: number;
@@ -42,6 +45,7 @@ export type DashboardSummaryPayload = {
 };
 
 export type DashboardInsightsPayload = {
+  costSemanticsNote: string;
   siteAvailability: ReturnType<
     typeof buildSiteAvailabilitySummariesFromHourlyAggregates
   >;
@@ -56,12 +60,6 @@ const dashboardSummaryPersistence =
     namespace: "dashboard-summary",
     key: "default",
   });
-const dashboardInsightsPersistence =
-  createAdminSnapshotPersistence<DashboardInsightsPayload>({
-    namespace: "dashboard-insights",
-    key: "default",
-  });
-
 async function loadDashboardSummaryPayload(): Promise<DashboardSummaryPayload> {
   await runUsageAggregationProjectionPass();
 
@@ -108,7 +106,7 @@ async function loadDashboardSummaryPayload(): Promise<DashboardSummaryPayload> {
         total: sql<number>`count(*)`,
         success: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 1 else 0 end), 0)`,
         failed: sql<number>`coalesce(sum(case when ${schema.proxyLogs.status} = 'success' then 0 else 1 end), 0)`,
-        businessLimit: sql<number>`coalesce(sum(case when ${schema.proxyLogs.httpStatus} in (429, 529) then 1 else 0 end), 0)`,
+        businessLimit: sql<number>`coalesce(sum(case when ${schema.proxyLogs.httpStatus} = 429 then 1 else 0 end), 0)`,
         totalTokens: sql<number>`coalesce(sum(coalesce(${schema.proxyLogs.totalTokens}, 0)), 0)`,
       })
       .from(schema.proxyLogs)
@@ -186,14 +184,43 @@ async function loadDashboardSummaryPayload(): Promise<DashboardSummaryPayload> {
   };
 }
 
-async function loadDashboardInsightsPayload(): Promise<DashboardInsightsPayload> {
+export type DashboardInsightsSnapshotOptions = {
+  days?: number;
+  siteId?: number | null;
+  platform?: string | null;
+};
+
+function normalizeDashboardInsightsOptions(
+  options: DashboardInsightsSnapshotOptions = {},
+) {
+  const siteId = Number.isFinite(options.siteId) && Number(options.siteId) > 0
+    ? Math.trunc(Number(options.siteId))
+    : null;
+  const platform = String(options.platform || '').trim() || null;
+  return {
+    days: Math.max(1, Math.trunc(Number(options.days || 7))),
+    siteId,
+    platform,
+  };
+}
+
+async function loadDashboardInsightsPayload(
+  options: DashboardInsightsSnapshotOptions = {},
+): Promise<DashboardInsightsPayload> {
+  const normalized = normalizeDashboardInsightsOptions(options);
   const siteAvailabilityNow = getLocalHourAnchor();
   const siteAvailabilitySinceUtc = getLocalHourRangeStartUtc(
     SITE_AVAILABILITY_BUCKET_COUNT,
     siteAvailabilityNow,
   );
-  const modelAnalysisSinceDay = getLocalRangeStartDayKey(7);
+  const modelAnalysisSinceDay = getLocalRangeStartDayKey(normalized.days);
   await runUsageAggregationProjectionPass();
+
+  const siteFilters = [
+    ...(normalized.siteId == null ? [] : [eq(schema.sites.id, normalized.siteId)]),
+    ...(normalized.platform == null ? [] : [eq(schema.sites.platform, normalized.platform)]),
+  ];
+  const siteWhere = siteFilters.length > 0 ? and(...siteFilters) : undefined;
 
   const [activeSites, siteAvailabilityRows, modelDayRows] =
     await Promise.all([
@@ -207,7 +234,7 @@ async function loadDashboardInsightsPayload(): Promise<DashboardInsightsPayload>
           isPinned: schema.sites.isPinned,
         })
         .from(schema.sites)
-        .where(eq(schema.sites.status, "active"))
+        .where(siteWhere)
         .all(),
       db
         .select()
@@ -235,6 +262,7 @@ async function loadDashboardInsightsPayload(): Promise<DashboardInsightsPayload>
   const activeSiteIdSet = new Set(sortedSites.map((site) => site.id));
 
   return {
+    costSemanticsNote: USAGE_AGGREGATE_COST_SEMANTICS_NOTE,
     siteAvailability: buildSiteAvailabilitySummariesFromHourlyAggregates(
       sortedSites,
       siteAvailabilityRows
@@ -261,8 +289,9 @@ async function loadDashboardInsightsPayload(): Promise<DashboardInsightsPayload>
           totalTokens: row.totalTokens,
           totalSpend: row.totalSpend,
           totalLatencyMs: row.totalLatencyMs,
+          latencyCount: row.latencyCount,
         })),
-      { days: 7 },
+      { days: normalized.days },
     ),
   };
 }
@@ -282,13 +311,21 @@ export async function getDashboardSummarySnapshot(options?: {
 
 export async function getDashboardInsightsSnapshot(options?: {
   forceRefresh?: boolean;
+  days?: number;
+  siteId?: number | null;
+  platform?: string | null;
 }): Promise<SnapshotEnvelope<DashboardInsightsPayload>> {
+  const normalized = normalizeDashboardInsightsOptions(options);
+  const key = JSON.stringify(normalized);
   return readSnapshotCache({
     namespace: "dashboard-insights",
-    key: "default",
+    key,
     ttlMs: DASHBOARD_INSIGHTS_TTL_MS,
     forceRefresh: options?.forceRefresh,
-    persistence: dashboardInsightsPersistence,
-    loader: loadDashboardInsightsPayload,
+    persistence: createAdminSnapshotPersistence<DashboardInsightsPayload>({
+      namespace: "dashboard-insights",
+      key,
+    }),
+    loader: () => loadDashboardInsightsPayload(normalized),
   });
 }

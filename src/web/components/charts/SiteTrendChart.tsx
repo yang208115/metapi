@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { VChart } from '@visactor/react-vchart';
+import { useThemeLabelColor } from '../useThemeLabelColor.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -43,17 +44,31 @@ const COLOR_PALETTE = [
 
 export default function SiteTrendChart({ data, loading }: SiteTrendChartProps) {
   const [metric, setMetric] = useState<Metric>('spend');
+  const labelColor = useThemeLabelColor();
 
   /* ---------- data transform ---------- */
 
   const flatData = useMemo(() => {
     if (!data || data.length === 0) return [];
+    const siteEntries = new Set(data.flatMap((d) => Object.keys(d.sites)));
+    const nameCounts = new Map<string, number>();
+    for (const identity of siteEntries) {
+      const name = identity.replace(/::\d+$/, '');
+      nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+    }
+
     return data.flatMap((d) =>
-      Object.entries(d.sites).map(([site, v]) => ({
-        date: d.date,
-        site,
-        value: metric === 'spend' ? v.spend : v.calls,
-      })),
+      Object.entries(d.sites).map(([identity, v]) => {
+        const name = identity.replace(/::\d+$/, '');
+        const siteId = identity.match(/::(\d+)$/)?.[1];
+        return {
+          date: d.date,
+          site: nameCounts.get(name) && nameCounts.get(name)! > 1
+            ? `${name} (#${siteId || 'unknown'})`
+            : name,
+          value: metric === 'spend' ? v.spend : v.calls,
+        };
+      }),
     );
   }, [data, metric]);
 
@@ -107,7 +122,7 @@ export default function SiteTrendChart({ data, loading }: SiteTrendChartProps) {
       padding: { top: 12 },
       item: {
         shape: { style: { symbolType: 'circle' } },
-        label: { style: { fontSize: 12 } },
+        label: { style: { fontSize: 12, fill: labelColor } },
       },
     },
     tooltip: {
@@ -144,16 +159,16 @@ export default function SiteTrendChart({ data, loading }: SiteTrendChartProps) {
     axes: [
       {
         orient: 'bottom',
-        label: { style: { fontSize: 11, fill: 'var(--color-text-muted)' } },
-        domainLine: { style: { stroke: 'var(--color-border-light)' } },
-        tick: { style: { stroke: 'var(--color-border-light)' } },
+        label: { style: { fontSize: 11, fill: labelColor } },
+        domainLine: { style: { stroke: 'rgba(148, 163, 184, 0.3)' } },
+        tick: { style: { stroke: 'rgba(148, 163, 184, 0.3)' } },
       },
       {
         orient: 'left',
         label: {
-          style: { fontSize: 11, fill: 'var(--color-text-muted)' },
+          style: { fontSize: 11, fill: labelColor },
         },
-        grid: { style: { stroke: 'var(--color-border-light)', lineDash: [4, 4] } },
+        grid: { style: { stroke: 'rgba(148, 163, 184, 0.2)', lineDash: [4, 4] } },
         domainLine: { visible: false },
       },
     ],

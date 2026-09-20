@@ -13,45 +13,19 @@
 
 > [!NOTE]
 > - 当前不再提供 `Release` 压缩包 + Node.js 运行时的独立部署路径。
-
-
-如果你现在只是一个最普通的 Docker / Docker Compose 部署，请先跳过这节。
-
-这套能力只适用于：
-
-- 你已经在 K3s / Kubernetes 中部署了 Metapi
-- 而且当前 Metapi 是通过 Helm release 管理的
-
-它不适用于：
-
-- 只有一个裸 Docker Compose 容器
-- 想直接从管理后台更新外部 Docker 主机上的容器
-
-
-如果你已经通过 Helm 在 K3s / Kubernetes 中部署 Metapi，并希望在管理后台中：
-
-- 查看当前运行版本
-- 通过集群内 helper 手动触发一次升级
-
-请直接阅读：
-
-
-这页会单独说明 helper 部署、主服务 token 对齐、设置页字段含义、实际升级顺序和已知限制。
+> - 本仓库是独立重构版；上游 `1467078763/metapi` 镜像不包含本仓库改动。
 
 ## Docker Compose 部署（推荐）
 
 ### 标准步骤
 
 ```bash
-mkdir metapi && cd metapi
+git clone https://github.com/yang208115/metapi.git
+cd metapi
+cp .env.example .env
 
-# 创建 docker-compose.yml（参见快速上手）
-# 设置环境变量
-export AUTH_TOKEN=your-admin-token
-export PROXY_TOKEN=your-proxy-sk-token
-
-# 启动
-docker compose up -d
+# 编辑 .env 后，从当前源码构建并启动
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
 ### 使用 `.env` 文件
@@ -62,27 +36,35 @@ docker compose up -d
 # .env
 AUTH_TOKEN=your-admin-token
 PROXY_TOKEN=your-proxy-sk-token
+ACCOUNT_CREDENTIAL_SECRET=replace-with-a-strong-random-secret
 TZ=Asia/Shanghai
 PORT=4000
 ```
 
 ```bash
-docker compose --env-file .env up -d
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
 > ⚠️ `.env` 文件包含敏感信息，请勿提交到 Git 仓库。
 
 ## Docker 命令部署
 
+先在仓库根目录构建本地镜像：
+
+```bash
+docker build -f docker/Dockerfile -t metapi-refactor:local .
+```
+
 ```bash
 docker run -d --name metapi \
   -p 4000:4000 \
   -e AUTH_TOKEN=your-admin-token \
   -e PROXY_TOKEN=your-proxy-sk-token \
+  -e ACCOUNT_CREDENTIAL_SECRET=replace-with-a-strong-random-secret \
   -e TZ=Asia/Shanghai \
   -v ./data:/app/data \
   --restart unless-stopped \
-  1467078763/metapi:latest
+  metapi-refactor:local
 ```
 
 > **路径说明：**
@@ -90,7 +72,7 @@ docker run -d --name metapi \
 > - 也可以使用绝对路径：`/your/custom/path:/app/data`
 ## 本地开发运行（源码调试）
 
-开发、调试或提交 PR 的完整流程见 [快速上手 → 本地开发启动](./getting-started.md#方式三-本地开发启动) 和 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+开发、调试或提交 PR 的完整流程见 [快速上手 → 本地开发启动](./getting-started.md#方式二-本地开发启动) 和 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 > [!NOTE]
 > 这条路径是开发流程，不是下载 `Release` 包后再手动跑 Node.js 的替代说法。

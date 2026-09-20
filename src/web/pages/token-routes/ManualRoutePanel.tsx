@@ -366,7 +366,7 @@ export default function ManualRoutePanel({
             {tr('保存中...')}
           </>
         ) : (
-          tr(editingRouteId ? '保存群组' : '创建群组')
+          tr(editingRouteId ? '保存并生效' : '创建并生效')
         )}
       </button>
     </>
@@ -491,7 +491,7 @@ export default function ManualRoutePanel({
                       {tr('来源模型')}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                      {tr('选择一个或多个现有精确模型路由作为来源。')}
+                      {tr('选择现有精确模型作为来源。群组是引用来源通道，修改通道也会影响其他群组，保存并生效。')}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

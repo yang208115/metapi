@@ -36,7 +36,7 @@ src/server/
 ├── db/                   # schema、连接、迁移、兼容列修复
 ├── middleware/           # 认证等通用中间件
 ├── routes/
-│   ├── api/              # 管理端 API（sites / accounts / tokens / settings ...）
+│   ├── api/              # 管理端 API（sites / accounts / routes / settings ...）
 │   └── proxy/            # OpenAI / Claude / Gemini 兼容代理入口
 ├── services/             # 业务服务、平台适配器、日志 / 文件 / 路由 / 迁移能力
 └── transformers/         # 协议转换与共享归一化层

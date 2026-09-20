@@ -102,27 +102,13 @@ async function initializeAccountInBackground({
 }: AccountInitializationParams) {
   const summary = {
     accountId,
-    syncedTokenCount: 0,
     refreshedBalance: false,
     refreshedModels: false,
     rebuiltRoutes: false,
   };
 
-  let fetchedUpstreamTokens: Array<{ name?: string | null; key?: string | null; enabled?: boolean | null; tokenGroup?: string | null }> = [];
-  if (tokenType === 'session' && accessToken) {
-    try {
-      const syncedTokens = await adapter.getApiTokens(site.url, accessToken, platformUserId);
-      summary.syncedTokenCount = Array.isArray(syncedTokens) ? syncedTokens.length : 0;
-      fetchedUpstreamTokens = Array.isArray(syncedTokens) ? syncedTokens : [];
-    } catch {}
-  }
-
   const convergence = await convergeAccountMutation({
     accountId,
-    preferredApiToken: tokenType === 'session' ? apiToken : null,
-    defaultTokenSource: 'manual',
-    ensurePreferredTokenBeforeSync: tokenType === 'session',
-    upstreamTokens: fetchedUpstreamTokens,
     refreshBalance: tokenType === 'session',
     refreshModels: skipModelFetch !== true,
     rebuildRoutes: skipModelFetch !== true,
@@ -140,10 +126,10 @@ function buildQueuedAccountInitializationMessage(
   skipModelFetch?: boolean,
 ) {
   if (tokenType === 'session' && skipModelFetch === true) {
-    return '账号已添加，后台正在同步令牌和余额信息。';
+    return '账号已添加，后台正在同步余额信息。';
   }
   if (tokenType === 'session') {
-    return '账号已添加，后台正在同步令牌、余额和模型信息。';
+    return '账号已添加，后台正在同步余额和模型信息。';
   }
   if (skipModelFetch === true) {
     return '已添加为 API Key 账号（可用于代理转发）。';

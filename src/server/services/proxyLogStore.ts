@@ -7,6 +7,7 @@ import {
   hasProxyLogDownstreamApiKeyIdColumn,
   hasProxyLogStreamTimingColumns,
 } from '../db/index.js';
+import { recordProxyLogAttempt } from '../proxy-core/requestTelemetry.js';
 
 export type ProxyLogInsertInput = {
   routeId?: number | null;
@@ -30,6 +31,7 @@ export type ProxyLogInsertInput = {
   clientAppName?: string | null;
   clientConfidence?: string | null;
   errorMessage?: string | null;
+  errorClass?: string | null;
   retryCount?: number | null;
   createdAt?: string | null;
 };
@@ -258,6 +260,7 @@ export function isMissingProxyLogStreamTimingColumnsError(error: unknown): boole
 }
 
 export async function insertProxyLog(input: ProxyLogInsertInput): Promise<void> {
+  recordProxyLogAttempt(input);
   if (input.status === 'failed' || (input.retryCount ?? 0) > 0) {
     logOperationalEvent(input.status === 'failed' ? 'warn' : 'info', 'proxy.request_result', {
       routeId: input.routeId, channelId: input.channelId, accountId: input.accountId,

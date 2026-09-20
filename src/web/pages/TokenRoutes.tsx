@@ -1,5 +1,4 @@
 import { Fragment, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { api } from '../api.js';
 import { BrandGlyph, getBrand, InlineBrandIcon, type BrandInfo } from '../components/BrandIcon.js';
@@ -16,14 +15,7 @@ import {
   type RouteModelCandidatesByModelName,
 } from './helpers/routeModelCandidatesIndex.js';
 import { getInitialVisibleCount, getNextVisibleCount } from './helpers/progressiveRender.js';
-import {
-  buildRouteMissingTokenIndex,
-  normalizeMissingTokenModels,
-  type MissingTokenModelsByName,
-  type RouteMissingTokenHint,
-} from './helpers/routeMissingTokenHints.js';
 import { buildVisibleRouteList } from './helpers/routeListVisibility.js';
-import { buildZeroChannelPlaceholderRoutes } from './helpers/zeroChannelRoutes.js';
 import {
   getRouteRoutingStrategyDescription,
   getRouteRoutingStrategyLabel,
@@ -39,8 +31,6 @@ import type {
   RouteMode,
   RouteDecision,
   RouteIconOption,
-  MissingTokenRouteSiteActionItem,
-  MissingTokenGroupRouteSiteActionItem,
   GroupRouteItem,
 } from './token-routes/types.js';
 import {
@@ -68,10 +58,7 @@ import AddChannelModal from './token-routes/AddChannelModal.js';
 const EMPTY_ROUTE_CANDIDATE_VIEW: RouteCandidateView = {
   routeCandidates: [],
   accountOptions: [],
-  tokenOptionsByAccountId: {},
 };
-const EMPTY_MISSING_ITEMS: MissingTokenRouteSiteActionItem[] = [];
-const EMPTY_MISSING_GROUP_ITEMS: MissingTokenGroupRouteSiteActionItem[] = [];
 const ROUTE_ICON_OPTIONS: RouteIconOption[] = [
   { value: '', label: '自动品牌图标', description: '按模型匹配规则自动识别品牌', iconText: '✦' },
 ];
@@ -179,11 +166,8 @@ export function DesktopDetailPanelPresence({
 }
 
 export default function TokenRoutes() {
-  const navigate = useNavigate();
   const [routeSummaries, setRouteSummaries] = useState<RouteSummaryRow[]>([]);
   const [modelCandidates, setModelCandidates] = useState<RouteModelCandidatesByModelName>({});
-  const [missingTokenModelsByName, setMissingTokenModelsByName] = useState<MissingTokenModelsByName>({});
-  const [missingTokenGroupModelsByName, setMissingTokenGroupModelsByName] = useState<MissingTokenModelsByName>({});
   const [endpointTypesByModel, setEndpointTypesByModel] = useState<Record<string, string[]>>({});
 
   const [search, setSearch] = useState('');
@@ -207,7 +191,6 @@ export default function TokenRoutes() {
   const [batchSelectMode, setBatchSelectMode] = useState(false);
   const [selectedRouteIds, setSelectedRouteIds] = useState<Set<number>>(new Set());
 
-  const [channelTokenDraft, setChannelTokenDraft] = useState<Record<number, number>>({});
   const [updatingChannel, setUpdatingChannel] = useState<Record<number, boolean>>({});
   const [savingPriorityByRoute, setSavingPriorityByRoute] = useState<Record<number, boolean>>({});
   const [updatingRoutingStrategyByRoute, setUpdatingRoutingStrategyByRoute] = useState<Record<number, boolean>>({});
@@ -249,16 +232,10 @@ export default function TokenRoutes() {
     let promise!: Promise<void>;
     promise = (async () => {
       try {
-        const candidateRows = await api.getModelTokenCandidates();
+        const candidateRows = await api.getModelRouteCandidates();
         if (candidatesSeqRef.current !== seq) return; // stale
         startTransition(() => {
           setModelCandidates((candidateRows?.models || {}) as RouteModelCandidatesByModelName);
-          setMissingTokenModelsByName(
-            normalizeMissingTokenModels((candidateRows?.modelsWithoutToken || {}) as MissingTokenModelsByName),
-          );
-          setMissingTokenGroupModelsByName(
-            normalizeMissingTokenModels((candidateRows?.modelsMissingTokenGroups || {}) as MissingTokenModelsByName),
-          );
           setEndpointTypesByModel(candidateRows?.endpointTypesByModel || {});
         });
         candidatesVersionRef.current = Date.now();
@@ -444,10 +421,7 @@ export default function TokenRoutes() {
     [routeSummaries],
   );
 
-  const zeroChannelPlaceholderRoutes = useMemo(
-    () => buildZeroChannelPlaceholderRoutes(routeSummaries, missingTokenModelsByName, missingTokenGroupModelsByName),
-    [routeSummaries, missingTokenModelsByName, missingTokenGroupModelsByName],
-  );
+  const zeroChannelPlaceholderRoutes = useMemo(() => [], []);
 
   const visibleRouteRows = useMemo(
     () => (showZeroChannelRoutes ? [...routeSummaries, ...zeroChannelPlaceholderRoutes] : routeSummaries),
@@ -971,74 +945,10 @@ export default function TokenRoutes() {
     return view;
   };
 
-  // Lazy per-route missing token index
-  const missingTokenCacheRef = useRef<{ key: string; cache: Map<number, RouteMissingTokenHint[]> }>({ key: '', cache: new Map() });
-  const missingTokenCacheKey = `${routePatternsKey}|${Object.keys(missingTokenModelsByName).length}|${candidatesVersionRef.current}`;
-  if (missingTokenCacheRef.current.key !== missingTokenCacheKey) {
-    missingTokenCacheRef.current = { key: missingTokenCacheKey, cache: new Map() };
-  }
-
-  const getRouteMissingTokenHints = (routeId: number): RouteMissingTokenHint[] => {
-    const cache = missingTokenCacheRef.current.cache;
-    const cached = cache.get(routeId);
-    if (cached) return cached;
-    const route = routePatterns.find((r) => r.id === routeId);
-    if (!route) return [];
-    const index = buildRouteMissingTokenIndex([route], missingTokenModelsByName, matchesModelPattern);
-    const hints = index[routeId] || [];
-    cache.set(routeId, hints);
-    return hints;
-  };
-
-  const missingTokenSiteItemsCacheRef = useRef<{ key: string; cache: Map<number, MissingTokenRouteSiteActionItem[]> }>({
-    key: '',
-    cache: new Map(),
-  });
-  if (missingTokenSiteItemsCacheRef.current.key !== missingTokenCacheKey) {
-    missingTokenSiteItemsCacheRef.current = { key: missingTokenCacheKey, cache: new Map() };
-  }
-
-  // Lazy per-route missing token group index
-  const missingTokenGroupCacheRef = useRef<{ key: string; cache: Map<number, RouteMissingTokenHint[]> }>({ key: '', cache: new Map() });
-  const missingTokenGroupCacheKey = `${routePatternsKey}|${Object.keys(missingTokenGroupModelsByName).length}|${candidatesVersionRef.current}`;
-  if (missingTokenGroupCacheRef.current.key !== missingTokenGroupCacheKey) {
-    missingTokenGroupCacheRef.current = { key: missingTokenGroupCacheKey, cache: new Map() };
-  }
-
-  const getRouteMissingTokenGroupHints = (routeId: number): RouteMissingTokenHint[] => {
-    const cache = missingTokenGroupCacheRef.current.cache;
-    const cached = cache.get(routeId);
-    if (cached) return cached;
-    const route = routePatterns.find((r) => r.id === routeId);
-    if (!route) return [];
-    const index = buildRouteMissingTokenIndex([route], missingTokenGroupModelsByName, matchesModelPattern);
-    const hints = index[routeId] || [];
-    cache.set(routeId, hints);
-    return hints;
-  };
-
-  const missingTokenGroupItemsCacheRef = useRef<{ key: string; cache: Map<number, MissingTokenGroupRouteSiteActionItem[]> }>({
-    key: '',
-    cache: new Map(),
-  });
-  if (missingTokenGroupItemsCacheRef.current.key !== missingTokenGroupCacheKey) {
-    missingTokenGroupItemsCacheRef.current = { key: missingTokenGroupCacheKey, cache: new Map() };
-  }
-
   const routeById = useMemo(
     () => new Map(visibleRouteRows.map((route) => [route.id, route])),
     [visibleRouteRows],
   );
-
-  const handleCreateTokenForMissingAccount = (accountId: number, modelName: string) => {
-    if (!Number.isFinite(accountId) || accountId <= 0) return;
-    const params = new URLSearchParams();
-    params.set('create', '1');
-    params.set('accountId', String(accountId));
-    params.set('model', modelName);
-    params.set('from', 'routes');
-    navigate(`/tokens?${params.toString()}`);
-  };
 
   const handleDeleteChannel = async (channelId: number, routeId: number) => {
     const dismissedKey = 'metapi:channel-delete-warning-dismissed';
@@ -1097,27 +1007,6 @@ export default function TokenRoutes() {
       await loadChannels(routeId, true);
     } catch (e: any) {
       toast.error(e.message || '更新通道状态失败');
-    } finally {
-      setUpdatingChannel((prev) => ({ ...prev, [channelId]: false }));
-    }
-  };
-
-  const handleChannelTokenSave = async (routeId: number, channelId: number, accountId: number) => {
-    const tokenId = channelTokenDraft[channelId];
-    const tokenOptions = getRouteCandidateView(routeId).tokenOptionsByAccountId[accountId] || [];
-
-    if (tokenId && tokenOptions.length > 0 && !tokenOptions.some((token) => token.id === tokenId)) {
-      toast.error('该令牌不支持当前模型');
-      return;
-    }
-
-    setUpdatingChannel((prev) => ({ ...prev, [channelId]: true }));
-    try {
-      await api.updateChannel(channelId, { tokenId: tokenId || null });
-      toast.success('通道令牌已更新');
-      await loadChannels(routeId, true);
-    } catch (e: any) {
-      toast.error(e.message || '更新令牌失败');
     } finally {
       setUpdatingChannel((prev) => ({ ...prev, [channelId]: false }));
     }
@@ -1345,87 +1234,6 @@ export default function TokenRoutes() {
     desktopDetailCloseTimersRef.current = {};
   }, []);
 
-  const getMissingTokenSiteItems = (routeId: number): MissingTokenRouteSiteActionItem[] => {
-    const cached = missingTokenSiteItemsCacheRef.current.cache.get(routeId);
-    if (cached) return cached;
-    const missingTokenHints = getRouteMissingTokenHints(routeId);
-    if (missingTokenHints.length === 0) return EMPTY_MISSING_ITEMS;
-    const siteMap = new Map<string, MissingTokenRouteSiteActionItem>();
-    for (const hint of missingTokenHints) {
-      for (const account of hint.accounts) {
-        if (!Number.isFinite(account.accountId) || account.accountId <= 0) continue;
-        const siteName = (account.siteName || '').trim() || `site-${account.siteId || 'unknown'}`;
-        const key = `${account.siteId || 0}::${siteName.toLowerCase()}`;
-        const accountLabel = account.username || `account-${account.accountId}`;
-        const existing = siteMap.get(key);
-        if (!existing) {
-          siteMap.set(key, { key, siteName, accountId: account.accountId, accountLabel });
-          continue;
-        }
-        if (account.accountId < existing.accountId) {
-          existing.accountId = account.accountId;
-          existing.accountLabel = accountLabel;
-        }
-      }
-    }
-    const items = Array.from(siteMap.values()).sort((a, b) => (
-      a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' })
-    ));
-    missingTokenSiteItemsCacheRef.current.cache.set(routeId, items);
-    return items;
-  };
-
-  const getMissingTokenGroupItems = (routeId: number): MissingTokenGroupRouteSiteActionItem[] => {
-    const cached = missingTokenGroupItemsCacheRef.current.cache.get(routeId);
-    if (cached) return cached;
-    const missingGroupHints = getRouteMissingTokenGroupHints(routeId);
-    if (missingGroupHints.length === 0) return EMPTY_MISSING_GROUP_ITEMS;
-    const siteMap = new Map<string, MissingTokenGroupRouteSiteActionItem>();
-    for (const hint of missingGroupHints) {
-      for (const account of hint.accounts) {
-        if (!Number.isFinite(account.accountId) || account.accountId <= 0) continue;
-        const siteName = (account.siteName || '').trim() || `site-${account.siteId || 'unknown'}`;
-        const key = `${account.siteId || 0}::${siteName.toLowerCase()}`;
-        const accountLabel = account.username || `account-${account.accountId}`;
-        const missingGroups = Array.isArray(account.missingGroups) ? account.missingGroups : [];
-        const requiredGroups = Array.isArray(account.requiredGroups) ? account.requiredGroups : [];
-        const availableGroups = Array.isArray(account.availableGroups) ? account.availableGroups : [];
-        const existing = siteMap.get(key);
-        if (!existing) {
-          siteMap.set(key, {
-            key,
-            siteName,
-            accountId: account.accountId,
-            accountLabel,
-            missingGroups: [...missingGroups],
-            requiredGroups: [...requiredGroups],
-            availableGroups: [...availableGroups],
-            ...(account.groupCoverageUncertain === true ? { groupCoverageUncertain: true } : {}),
-          });
-          continue;
-        }
-        if (account.accountId < existing.accountId) {
-          existing.accountId = account.accountId;
-          existing.accountLabel = accountLabel;
-        }
-        existing.missingGroups = Array.from(new Set([...existing.missingGroups, ...missingGroups]))
-          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-        existing.requiredGroups = Array.from(new Set([...existing.requiredGroups, ...requiredGroups]))
-          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-        existing.availableGroups = Array.from(new Set([...existing.availableGroups, ...availableGroups]))
-          .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-        if (account.groupCoverageUncertain === true) {
-          existing.groupCoverageUncertain = true;
-        }
-      }
-    }
-    const items = Array.from(siteMap.values()).sort((a, b) => (
-      a.siteName.localeCompare(b.siteName, undefined, { sensitivity: 'base' })
-    ));
-    missingTokenGroupItemsCacheRef.current.cache.set(routeId, items);
-    return items;
-  };
-
   // Stable callbacks for RouteCard memo (use refs to avoid dependency on closure variables)
   const toggleExpandRef = useRef(toggleExpand);
   toggleExpandRef.current = toggleExpand;
@@ -1445,22 +1253,12 @@ export default function TokenRoutes() {
     (route: RouteSummaryRow, strategy: RouteRoutingStrategy) => handleRoutingStrategyChangeRef.current(route, strategy),
     [],
   );
-  const stableTokenDraftChange = useCallback(
-    (channelId: number, tokenId: number) => setChannelTokenDraft((prev) => ({ ...prev, [channelId]: tokenId })),
-    [],
-  );
   const stableAddChannel = useCallback((routeId: number) => {
     loadCandidates();
     setAddChannelModalRouteId(routeId);
   }, []);
   const stableToggleSourceGroup = useCallback(
     (groupKey: string) => setExpandedSourceGroupMap((prev) => ({ ...prev, [groupKey]: !prev[groupKey] })),
-    [],
-  );
-  const handleChannelTokenSaveRef = useRef(handleChannelTokenSave);
-  handleChannelTokenSaveRef.current = handleChannelTokenSave;
-  const stableChannelTokenSave = useCallback(
-    (routeId: number, channelId: number, accountId: number) => handleChannelTokenSaveRef.current(routeId, channelId, accountId),
     [],
   );
   const handleDeleteChannelRef = useRef(handleDeleteChannel);
@@ -1479,12 +1277,6 @@ export default function TokenRoutes() {
   handleChannelDragEndRef.current = handleChannelDragEnd;
   const stableChannelDragEnd = useCallback(
     (routeId: number, event: DragEndEvent) => handleChannelDragEndRef.current(routeId, event),
-    [],
-  );
-  const handleCreateTokenRef = useRef(handleCreateTokenForMissingAccount);
-  handleCreateTokenRef.current = handleCreateTokenForMissingAccount;
-  const stableCreateTokenForMissing = useCallback(
-    (accountId: number, modelName: string) => handleCreateTokenRef.current(accountId, modelName),
     [],
   );
   const handleSiteBlockModelRef = useRef(handleSiteBlockModel);
@@ -1848,18 +1640,11 @@ export default function TokenRoutes() {
                     loadingChannels={!!loadingChannelsByRouteId[route.id]}
                     routeDecision={decisionByRoute[route.id] || null}
                     loadingDecision={loadingDecision}
-                    candidateView={getRouteCandidateView(route.id)}
-                    channelTokenDraft={channelTokenDraft}
                     updatingChannel={updatingChannel}
                     savingPriority={!!savingPriorityByRoute[route.id]}
-                    onTokenDraftChange={stableTokenDraftChange}
-                    onSaveToken={stableChannelTokenSave}
                     onDeleteChannel={stableDeleteChannel}
                     onToggleChannelEnabled={stableToggleChannelEnabled}
                     onChannelDragEnd={stableChannelDragEnd}
-                    missingTokenSiteItems={getMissingTokenSiteItems(route.id)}
-                    missingTokenGroupItems={getMissingTokenGroupItems(route.id)}
-                    onCreateTokenForMissing={stableCreateTokenForMissing}
                     onAddChannel={stableAddChannel}
                     onSiteBlockModel={stableSiteBlockModel}
                     expandedSourceGroupMap={expandedSourceGroupMap}
@@ -1888,18 +1673,11 @@ export default function TokenRoutes() {
               loadingChannels={!!loadingChannelsByRouteId[route.id]}
               routeDecision={decisionByRoute[route.id] || null}
               loadingDecision={loadingDecision}
-              candidateView={EMPTY_ROUTE_CANDIDATE_VIEW}
-              channelTokenDraft={channelTokenDraft}
               updatingChannel={updatingChannel}
               savingPriority={!!savingPriorityByRoute[route.id]}
-              onTokenDraftChange={stableTokenDraftChange}
-              onSaveToken={stableChannelTokenSave}
               onDeleteChannel={stableDeleteChannel}
               onToggleChannelEnabled={stableToggleChannelEnabled}
               onChannelDragEnd={stableChannelDragEnd}
-              missingTokenSiteItems={EMPTY_MISSING_ITEMS}
-              missingTokenGroupItems={EMPTY_MISSING_GROUP_ITEMS}
-              onCreateTokenForMissing={stableCreateTokenForMissing}
               onAddChannel={stableAddChannel}
               onSiteBlockModel={stableSiteBlockModel}
               expandedSourceGroupMap={expandedSourceGroupMap}
@@ -1927,18 +1705,11 @@ export default function TokenRoutes() {
                   loadingChannels={!!loadingChannelsByRouteId[route.id]}
                   routeDecision={decisionByRoute[route.id] || null}
                   loadingDecision={loadingDecision}
-                  candidateView={getRouteCandidateView(route.id)}
-                  channelTokenDraft={channelTokenDraft}
                   updatingChannel={updatingChannel}
                   savingPriority={!!savingPriorityByRoute[route.id]}
-                  onTokenDraftChange={stableTokenDraftChange}
-                  onSaveToken={stableChannelTokenSave}
                   onDeleteChannel={stableDeleteChannel}
                   onToggleChannelEnabled={stableToggleChannelEnabled}
                   onChannelDragEnd={stableChannelDragEnd}
-                  missingTokenSiteItems={getMissingTokenSiteItems(route.id)}
-                  missingTokenGroupItems={getMissingTokenGroupItems(route.id)}
-                  onCreateTokenForMissing={stableCreateTokenForMissing}
                   onAddChannel={stableAddChannel}
                   onSiteBlockModel={stableSiteBlockModel}
                   expandedSourceGroupMap={expandedSourceGroupMap}
@@ -2031,8 +1802,6 @@ export default function TokenRoutes() {
           routeTitle={resolveRouteTitle(addChannelModalRoute)}
           candidateView={getRouteCandidateView(addChannelModalRoute.id)}
           onSuccess={handleAddChannelSuccess}
-          missingTokenHints={getRouteMissingTokenHints(addChannelModalRoute.id)}
-          onCreateTokenForMissing={handleCreateTokenForMissingAccount}
           existingChannelAccountIds={new Set((channelsByRouteId[addChannelModalRoute.id] || []).map((c) => c.accountId))}
         />
       )}

@@ -1374,6 +1374,124 @@
         }
       }
     },
+    "proxy_request_outcomes": {
+      "columns": {
+        "id": {
+          "logicalType": "integer",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": true
+        },
+        "request_id": {
+          "logicalType": "text",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "started_at": {
+          "logicalType": "datetime",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "completed_at": {
+          "logicalType": "datetime",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "downstream_path": {
+          "logicalType": "text",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "model_requested": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "site_id": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "account_id": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "channel_id": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "status": {
+          "logicalType": "text",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "http_status": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "latency_ms": {
+          "logicalType": "integer",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "first_byte_latency_ms": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "attempt_count": {
+          "logicalType": "integer",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "failed_attempt_count": {
+          "logicalType": "integer",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "total_tokens": {
+          "logicalType": "integer",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "estimated_cost": {
+          "logicalType": "real",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "error_class": {
+          "logicalType": "text",
+          "notNull": false,
+          "defaultValue": null,
+          "primaryKey": false
+        },
+        "is_stream": {
+          "logicalType": "boolean",
+          "notNull": true,
+          "defaultValue": null,
+          "primaryKey": false
+        }
+      }
+    },
     "proxy_video_tasks": {
       "columns": {
         "id": {
@@ -2680,6 +2798,48 @@
       "columns": [
         "status",
         "created_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_request_outcomes_completed_at_idx",
+      "table": "proxy_request_outcomes",
+      "columns": [
+        "completed_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_request_outcomes_request_id_idx",
+      "table": "proxy_request_outcomes",
+      "columns": [
+        "request_id"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_request_outcomes_site_completed_idx",
+      "table": "proxy_request_outcomes",
+      "columns": [
+        "site_id",
+        "completed_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_request_outcomes_started_at_idx",
+      "table": "proxy_request_outcomes",
+      "columns": [
+        "started_at"
+      ],
+      "unique": false
+    },
+    {
+      "name": "proxy_request_outcomes_status_completed_idx",
+      "table": "proxy_request_outcomes",
+      "columns": [
+        "status",
+        "completed_at"
       ],
       "unique": false
     },

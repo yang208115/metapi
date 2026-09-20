@@ -1,8 +1,9 @@
-import { lt } from 'drizzle-orm';
+import { and, lt, lte, sql } from 'drizzle-orm';
 import { config } from '../config.js';
 import { db, schema } from '../db/index.js';
 import { formatUtcSqlDateTime } from './localTimeService.js';
 import { normalizeLogCleanupRetentionDays } from '../shared/logCleanupRetentionDays.js';
+import { ensureUsageAggregationProjectedThroughLogId } from './usageAggregationService.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -41,9 +42,31 @@ export async function cleanupUsageLogs(retentionDays: number, nowMs = Date.now()
     };
   }
 
+  const candidate = await db
+    .select({
+      maxId: sql<number | null>`max(${schema.proxyLogs.id})`,
+    })
+    .from(schema.proxyLogs)
+    .where(lt(schema.proxyLogs.createdAt, cutoffUtc))
+    .get();
+  const candidateMaxId = Math.max(0, Math.trunc(Number(candidate?.maxId || 0)));
+  if (candidateMaxId <= 0) {
+    return {
+      retentionDays: normalizedDays,
+      cutoffUtc,
+      deleted: 0,
+    };
+  }
+
+  // Project every candidate first. The id bound also prevents a late inserted
+  // old-dated row from bypassing the watermark check in this cleanup pass.
+  await ensureUsageAggregationProjectedThroughLogId(candidateMaxId);
   const deleted = (
     await db.delete(schema.proxyLogs)
-      .where(lt(schema.proxyLogs.createdAt, cutoffUtc))
+      .where(and(
+        lt(schema.proxyLogs.createdAt, cutoffUtc),
+        lte(schema.proxyLogs.id, candidateMaxId),
+      ))
       .run()
   ).changes;
 

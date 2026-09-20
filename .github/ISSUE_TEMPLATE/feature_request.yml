@@ -39,10 +39,10 @@ body:
       description: Which part of Metapi is this feature mainly about? / 这个功能主要涉及 Metapi 的哪个模块？
       options:
         - Site / Account Management / 站点与账号管理
-        - Token Management / 令牌管理
+        - Connection / Credential Management / 连接与凭证管理
         - Routing / 路由
         - Proxy API (/v1/*) / 代理接口
-        - Check-in / 签到
+        - Monitoring / Logs / 监控与日志
         - Notifications / 通知
         - Deployment / Database / 部署或数据库
         - Other / 其他

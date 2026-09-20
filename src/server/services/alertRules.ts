@@ -28,7 +28,7 @@ export function isTokenExpiredError(input: { status?: number; message?: string |
   if (!text) return false;
 
   // NewAPI-like sites may return this when session context is missing for an action,
-  // which does not always mean the account token is expired.
+  // which does not always mean the account session has expired.
   if (text.includes('未登录且未提供 access token')) return false;
 
   const tokenPhrase = text.includes('token') || text.includes('令牌') || text.includes('访问令牌');

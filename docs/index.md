@@ -2,9 +2,9 @@
 layout: home
 
 hero:
-  name: "Metapi 文档中心"
-  text: "中转站的中转站"
-  tagline: "将分散的 AI 中转站聚合为一个统一网关"
+  name: "Metapi 重构版文档"
+  text: "聚焦代理、路由与可观测性"
+  tagline: "基于 cita-777/metapi 独立重构的自托管 AI API 聚合网关"
   image:
     src: /logos/logo-full.png
     alt: Metapi
@@ -31,6 +31,9 @@ features:
     link: /faq
 ---
 
+> [!IMPORTANT]
+> 这是 [yang208115/metapi](https://github.com/yang208115/metapi) 重构版文档，不是 [cita-777/metapi](https://github.com/cita-777/metapi) 上游官方文档。部署时请从当前源码构建，不要把上游镜像当作本重构版。
+
 ## 项目架构
 
 <div class="home-architecture">
@@ -55,8 +58,6 @@ features:
       <figcaption>仪表盘</figcaption>
     </figure>
     <figure class="home-carousel-slide">
-    </figure>
-    <figure class="home-carousel-slide">
       <img src="./screenshots/routes.png" alt="智能路由" />
       <figcaption>智能路由</figcaption>
     </figure>
@@ -67,10 +68,6 @@ features:
     <figure class="home-carousel-slide">
       <img src="./screenshots/sites.png" alt="站点管理" />
       <figcaption>站点管理</figcaption>
-    </figure>
-    <figure class="home-carousel-slide">
-      <img src="./screenshots/tokens.png" alt="令牌管理" />
-      <figcaption>令牌管理</figcaption>
     </figure>
     <figure class="home-carousel-slide">
       <img src="./screenshots/playground.png" alt="模型操练场" />

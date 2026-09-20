@@ -131,9 +131,7 @@ function uniqIds(values: number[]): number[] {
 }
 
 function buildExcludedCredentialRefKey(ref: DownstreamExcludedCredentialRef): string {
-  return ref.kind === 'account_token'
-    ? `${ref.kind}:${ref.siteId}:${ref.accountId}:${ref.tokenId}`
-    : `${ref.kind}:${ref.siteId}:${ref.accountId}`;
+  return `${ref.kind}:${ref.siteId}:${ref.accountId}`;
 }
 
 function normalizeExcludedSiteIds(values: number[]): number[] {
@@ -144,17 +142,6 @@ function normalizeExcludedCredentialRefs(values: DownstreamExcludedCredentialRef
   const deduped = new Map<string, DownstreamExcludedCredentialRef>();
   for (const value of values) {
     if (!value || !Number.isFinite(value.siteId) || !Number.isFinite(value.accountId)) continue;
-    if (value.kind === 'account_token') {
-      if (!Number.isFinite(value.tokenId)) continue;
-      const normalized: DownstreamExcludedCredentialRef = {
-        kind: 'account_token',
-        siteId: Math.trunc(value.siteId),
-        accountId: Math.trunc(value.accountId),
-        tokenId: Math.trunc(value.tokenId),
-      };
-      deduped.set(buildExcludedCredentialRefKey(normalized), normalized);
-      continue;
-    }
     const normalized: DownstreamExcludedCredentialRef = {
       kind: 'default_api_key',
       siteId: Math.trunc(value.siteId),
@@ -326,6 +313,8 @@ function buildEditorForm(
   routeOptions: RouteSelectorItem[] = [],
   selectAllByDefault = false,
 ): DownstreamKeyEditorForm {
+  const hasCustomScope = (Array.isArray(item?.supportedModels) && item!.supportedModels.length > 0)
+    || (Array.isArray(item?.allowedRouteIds) && item!.allowedRouteIds.length > 0);
   const defaultSelections = selectAllByDefault
     ? buildDefaultRouteSelections(routeOptions)
     : { selectedModels: [], selectedGroupRouteIds: [] };
@@ -346,6 +335,7 @@ function buildEditorForm(
     maxRequests: item?.maxRequests === null || item?.maxRequests === undefined ? '' : String(item.maxRequests),
     expiresAt: toDateTimeLocal(item?.expiresAt),
     enabled: item?.enabled ?? true,
+    permissionScopeMode: hasCustomScope ? 'custom' : 'all',
     selectedModels: uniqStrings(selectedModels),
     selectedGroupRouteIds: uniqIds(selectedGroupRouteIds),
     siteWeightMultipliersText: JSON.stringify(item?.siteWeightMultipliers || {}, null, 2),
@@ -535,15 +525,11 @@ export default function DownstreamKeys() {
     if (exclusionSourceLoading || exclusionSourceLoaded) return;
     setExclusionSourceLoading(true);
     try {
-      const [accountsSnapshotRes, tokensRes] = await Promise.all([
-        api.getAccountsSnapshot(),
-        api.getAccountTokens(),
-      ]);
+      const accountsSnapshotRes = await api.getAccountsSnapshot();
 
       const accountRows = Array.isArray(accountsSnapshotRes?.accounts)
         ? accountsSnapshotRes.accounts
         : [];
-      const tokenRows = Array.isArray(tokensRes) ? tokensRes : [];
 
       const siteMap = new Map<number, { siteId: number; siteName: string; accountIds: Set<number> }>();
       for (const account of accountRows) {
@@ -581,21 +567,6 @@ export default function DownstreamKeys() {
         });
       }
 
-      for (const token of tokenRows) {
-        const siteId = Number(token?.site?.id);
-        const accountId = Number(token?.account?.id ?? token?.accountId);
-        const tokenId = Number(token?.id);
-        if (!Number.isFinite(siteId) || siteId <= 0 || !Number.isFinite(accountId) || accountId <= 0 || !Number.isFinite(tokenId) || tokenId <= 0) continue;
-        credentialOptions.push({
-          key: `account_token:${siteId}:${accountId}:${tokenId}`,
-          ref: { kind: 'account_token', siteId: Math.trunc(siteId), accountId: Math.trunc(accountId), tokenId: Math.trunc(tokenId) },
-          siteName: String(token?.site?.name || `站点 ${siteId}`).trim() || `站点 ${siteId}`,
-          accountName: String(token?.account?.username || `账号 ${accountId}`).trim() || `账号 ${accountId}`,
-          label: String(token?.name || `token-${tokenId}`).trim() || `token-${tokenId}`,
-          detail: String(token?.tokenGroup || 'default').trim() || 'default',
-        });
-      }
-
       setExclusionSiteOptions(siteOptions);
       setExclusionCredentialOptions(
         credentialOptions.sort((left, right) => (
@@ -606,7 +577,7 @@ export default function DownstreamKeys() {
       );
       setExclusionSourceLoaded(true);
     } catch (err: any) {
-      toast.error(err?.message || '加载可排除站点与令牌失败');
+      toast.error(err?.message || '加载可排除站点与账号失败');
     } finally {
       setExclusionSourceLoading(false);
     }
@@ -845,19 +816,21 @@ export default function DownstreamKeys() {
       }
     }
 
+    const isCustomScope = editorForm.permissionScopeMode === 'custom';
+    const normalizedSelectedModels = uniqStrings(editorForm.selectedModels);
+    const normalizedSelectedGroupRouteIds = uniqIds(editorForm.selectedGroupRouteIds)
+      .filter((id) => routeMap.has(id) && isGroupRouteOption(routeMap.get(id)!));
+
+    if (isCustomScope) {
+      const selectedCount = normalizedSelectedModels.length + normalizedSelectedGroupRouteIds.length;
+      if (selectedCount === 0) {
+        toast.error('指定模式下必须至少勾选一个模型或群组，以防意外保存为全部权限');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      const normalizedSelectedModels = uniqStrings(editorForm.selectedModels);
-      const normalizedSelectedGroupRouteIds = uniqIds(editorForm.selectedGroupRouteIds)
-        .filter((id) => routeMap.has(id) && isGroupRouteOption(routeMap.get(id)!));
-      const matchesDefaultRuntimeScope =
-        editingId === null
-        && !createRouteSelectionTouched
-        && normalizedSelectedModels.length === defaultRouteSelections.selectedModels.length
-        && normalizedSelectedModels.every((model, index) => model === defaultRouteSelections.selectedModels[index])
-        && normalizedSelectedGroupRouteIds.length === defaultRouteSelections.selectedGroupRouteIds.length
-        && normalizedSelectedGroupRouteIds.every((id, index) => id === defaultRouteSelections.selectedGroupRouteIds[index]);
-
       const payload = {
         name,
         key,
@@ -868,8 +841,8 @@ export default function DownstreamKeys() {
         expiresAt: editorForm.expiresAt ? new Date(editorForm.expiresAt).toISOString() : null,
         maxCost: editorForm.maxCost.trim() ? Number(editorForm.maxCost.trim()) : null,
         maxRequests: editorForm.maxRequests.trim() ? Number(editorForm.maxRequests.trim()) : null,
-        supportedModels: matchesDefaultRuntimeScope ? [] : normalizedSelectedModels,
-        allowedRouteIds: matchesDefaultRuntimeScope ? [] : normalizedSelectedGroupRouteIds,
+        supportedModels: isCustomScope ? normalizedSelectedModels : [],
+        allowedRouteIds: isCustomScope ? normalizedSelectedGroupRouteIds : [],
         siteWeightMultipliers,
         excludedSiteIds: normalizeExcludedSiteIds(editorForm.excludedSiteIds),
         excludedCredentialRefs: normalizeExcludedCredentialRefs(editorForm.excludedCredentialRefs),

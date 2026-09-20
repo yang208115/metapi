@@ -36,6 +36,7 @@ const TABLES_WITH_NUMERIC_ID = new Set([
   'oauth_route_units',
   'oauth_route_unit_members',
   'proxy_logs',
+  'proxy_request_outcomes',
   'proxy_debug_traces',
   'proxy_debug_attempts',
   'proxy_video_tasks',
@@ -170,7 +171,7 @@ function execSqliteLegacyCompat(sqlText: string): void {
   executeLegacyCompatSync(execSqliteStatement, sqlText);
 }
 
-function ensureTokenManagementSchema() {
+function ensureLegacyAccountTokenSchemaCompatibility() {
   if (!tableExists('accounts') || !tableExists('route_channels')) {
     return;
   }
@@ -200,30 +201,6 @@ function ensureTokenManagementSchema() {
   if (!tableColumnExists('account_tokens', 'value_status')) {
     execSqliteLegacyCompat("ALTER TABLE account_tokens ADD COLUMN value_status text NOT NULL DEFAULT 'ready';");
   }
-
-  execSqliteStatement(`
-    INSERT INTO account_tokens (account_id, name, token, source, enabled, is_default, created_at, updated_at)
-    SELECT
-      a.id,
-      'default',
-      a.api_token,
-      'legacy',
-      true,
-      true,
-      datetime('now'),
-      datetime('now')
-    FROM accounts AS a
-    WHERE
-      a.api_token IS NOT NULL
-      AND trim(a.api_token) <> ''
-      AND a.access_token IS NOT NULL
-      AND trim(a.access_token) <> ''
-      AND NOT EXISTS (
-        SELECT 1 FROM account_tokens AS t
-        WHERE t.account_id = a.id
-        AND t.token = a.api_token
-      );
-  `);
 
   execSqliteLegacyCompat(`
     CREATE TABLE IF NOT EXISTS token_model_availability (
@@ -1372,7 +1349,7 @@ function initSqliteDb() {
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
 
-  ensureTokenManagementSchema();
+  ensureLegacyAccountTokenSchemaCompatibility();
   ensureSiteStatusSchema();
   ensureSiteProxySchema();
   ensureSiteUseSystemProxySchema();

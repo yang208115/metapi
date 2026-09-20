@@ -828,7 +828,7 @@ export async function sitesRoutes(app: FastifyInstance) {
     return { siteId: id, models: uniqueModels };
   });
 
-  // Get all discovered models for a site (from model_availability and token_model_availability)
+  // Get all discovered models for a site.
   app.get<{ Params: { id: string } }>('/api/sites/:id/available-models', async (request, reply) => {
     const id = parseInt(request.params.id);
     if (Number.isNaN(id)) {
@@ -839,7 +839,6 @@ export async function sitesRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'Site not found' });
     }
 
-    // Get models from model_availability (account-level)
     const accountModels = await db.select({ modelName: schema.modelAvailability.modelName })
       .from(schema.modelAvailability)
       .innerJoin(schema.accounts, eq(schema.modelAvailability.accountId, schema.accounts.id))
@@ -851,23 +850,9 @@ export async function sitesRoutes(app: FastifyInstance) {
       )
       .all() as SiteModelNameRow[];
 
-    // Get models from token_model_availability (token-level)
-    const tokenModels = await db.select({ modelName: schema.tokenModelAvailability.modelName })
-      .from(schema.tokenModelAvailability)
-      .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
-      .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-      .where(
-        and(
-          eq(schema.accounts.siteId, id),
-          eq(schema.tokenModelAvailability.available, true),
-        ),
-      )
-      .all() as SiteModelNameRow[];
-
-    const models = Array.from(new Set([
-      ...accountModels.map((r) => r.modelName.trim()),
-      ...tokenModels.map((r) => r.modelName.trim()),
-    ])).filter((m) => m.length > 0).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    const models = Array.from(new Set(
+      accountModels.map((r) => r.modelName.trim()),
+    )).filter((m) => m.length > 0).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
     return { siteId: id, models };
   });

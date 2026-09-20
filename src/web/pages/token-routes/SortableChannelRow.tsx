@@ -1,12 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import ModernSelect from '../../components/ModernSelect.js';
 import type { SortableChannelRowProps } from './types.js';
-import {
-  buildFixedTokenOptionDescription,
-  buildFixedTokenOptionLabel,
-  describeTokenBinding,
-  resolveTokenBindingConnectionMode,
-} from './tokenBindingPresentation.js';
 import { getChannelDecisionState, getPriorityTagStyle, getProbabilityColor } from './utils.js';
 
 function getRouteUnitStrategyLabel(strategy: string | null | undefined): string {
@@ -34,11 +27,6 @@ export function SortableChannelRow({
   channelManagementDisabled = false,
   dragInProgress = false,
   mobile = false,
-  tokenOptions,
-  activeTokenId,
-  isUpdatingToken,
-  onTokenDraftChange,
-  onSaveToken,
   onDeleteChannel,
   onToggleEnabled,
   onSiteBlockModel,
@@ -57,16 +45,15 @@ export function SortableChannelRow({
     minWidth: 22,
     height: 22,
     padding: 0,
-    border: `1px solid ${dragging ? 'color-mix(in srgb, var(--color-info) 34%, var(--color-border-light))' : 'var(--color-border-light)'}`,
-    borderRadius: 10,
+    border: '1px solid var(--color-border)',
+    borderRadius: 4,
     backgroundColor: dragging
-      ? 'color-mix(in srgb, var(--color-bg-card) 80%, var(--color-info) 20%)'
-      : 'color-mix(in srgb, var(--color-bg-card) 90%, white 10%)',
-    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.62)',
+      ? 'color-mix(in srgb, var(--color-bg-card) 85%, var(--color-info) 15%)'
+      : 'var(--color-bg-card)',
     color: dragging ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
     cursor: isSavingPriority || managementLocked ? 'not-allowed' : 'grab',
     opacity: managementLocked ? 0.65 : 1,
-    transition: 'background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, color 0.16s ease',
+    transition: 'background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease',
   };
 
   const rowStyle: CSSProperties = {
@@ -77,26 +64,15 @@ export function SortableChannelRow({
     alignItems: mobile ? 'stretch' : 'center',
     gap: mobile ? 8 : 6,
     padding: mobile ? '8px 9px' : '5px 8px',
-    border: `1px solid ${dragging ? 'color-mix(in srgb, var(--color-info) 38%, var(--color-border-light))' : 'color-mix(in srgb, var(--color-border-light) 92%, transparent)'}`,
-    borderRadius: 14,
+    border: `1px solid ${dragging ? 'var(--color-info)' : 'var(--color-border)'}`,
+    borderRadius: 6,
     backgroundColor: dragging
-      ? 'color-mix(in srgb, var(--color-bg-card) 82%, var(--color-info) 18%)'
-      : 'color-mix(in srgb, var(--color-bg-card) 96%, white 4%)',
-    boxShadow: dragging
-      ? '0 18px 34px rgba(15, 23, 42, 0.12)'
-      : '0 10px 22px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+      ? 'color-mix(in srgb, var(--color-bg-card) 85%, var(--color-info) 15%)'
+      : 'var(--color-bg-card)',
+    boxShadow: dragging ? 'var(--shadow-sm)' : 'none',
   };
 
   const decisionState = getChannelDecisionState(decisionCandidate, channel, isExactRoute, loadingDecision);
-  const tokenBinding = describeTokenBinding(
-    tokenOptions,
-    activeTokenId,
-    channel.token?.name ?? null,
-    {
-      connectionMode: resolveTokenBindingConnectionMode(channel.account),
-      accountName: channel.account?.username || `account-${channel.accountId}`,
-    },
-  );
   const routeUnit = channel.routeUnit ?? null;
   const routeUnitName = routeUnit?.name?.trim() || 'OAuth 路由池';
   const routeUnitStrategyLabel = routeUnit ? getRouteUnitStrategyLabel(routeUnit.strategy) : '';
@@ -166,35 +142,6 @@ export function SortableChannelRow({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-              <span
-                className="badge"
-                style={{
-                  fontSize: 10,
-                  background: tokenBinding.badgeTone === 'info'
-                    ? 'color-mix(in srgb, var(--color-info) 15%, transparent)'
-                    : 'color-mix(in srgb, var(--color-warning) 15%, transparent)',
-                  color: tokenBinding.badgeTone === 'info' ? 'var(--color-info)' : 'var(--color-warning)',
-                }}
-              >
-                {tokenBinding.bindingModeLabel}
-              </span>
-
-              <span
-                className="badge"
-                style={{
-                  fontSize: 10,
-                  background: 'var(--color-info-soft)',
-                  color: 'var(--color-info)',
-                  maxWidth: 220,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-                data-tooltip={suppressTooltips ? undefined : `当前生效：${tokenBinding.effectiveTokenName}`}
-              >
-                当前生效：{tokenBinding.effectiveTokenName}
-              </span>
-
               {channel.sourceModel ? (
                 <span className="badge badge-info" style={{ fontSize: 10 }}>
                   {channel.sourceModel}
@@ -249,7 +196,7 @@ export function SortableChannelRow({
                     width: 60,
                     height: 4,
                     background: 'color-mix(in srgb, var(--color-border) 88%, white 12%)',
-                    borderRadius: 999,
+                    borderRadius: 2,
                     overflow: 'hidden',
                   }}
                 >
@@ -258,7 +205,7 @@ export function SortableChannelRow({
                       width: `${Math.max(0, Math.min(100, decisionState.probability))}%`,
                       height: '100%',
                       background: getProbabilityColor(decisionState.probability),
-                      borderRadius: 999,
+                      borderRadius: 2,
                       transition: 'width 0.24s ease, background-color 0.18s ease',
                     }}
                   />
@@ -290,40 +237,7 @@ export function SortableChannelRow({
 
             {!managementLocked && mobileDetailsOpen && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 6, borderTop: '1px solid var(--color-border-light)' }}>
-                <div style={{ width: '100%' }}>
-                  <ModernSelect
-                    size="sm"
-                    value={String(activeTokenId || 0)}
-                    onChange={(nextValue) => onTokenDraftChange(channel.id, Number.parseInt(nextValue, 10) || 0)}
-                    disabled={isUpdatingToken}
-                    options={[
-                      {
-                        value: '0',
-                        label: tokenBinding.followOptionLabel,
-                        description: tokenBinding.followOptionDescription,
-                      },
-                      ...tokenOptions.map((token) => ({
-                        value: String(token.id),
-                        label: buildFixedTokenOptionLabel(token, { includeDefaultTag: true }),
-                        description: buildFixedTokenOptionDescription(token),
-                      })),
-                    ]}
-                    placeholder="选择令牌绑定方式"
-                  />
-                  <div style={{ marginTop: 3, fontSize: 10.5, color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
-                    {tokenBinding.helperText}
-                  </div>
-                </div>
-
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={onSaveToken}
-                    disabled={isUpdatingToken}
-                    className="btn btn-link btn-link-info"
-                  >
-                    {isUpdatingToken ? <span className="spinner spinner-sm" /> : '保存'}
-                  </button>
-
                   <button
                     onClick={() => onToggleEnabled(channel.enabled === false)}
                     className={`btn btn-link ${channel.enabled === false ? 'btn-link-info' : 'btn-link-warning'}`}
@@ -398,35 +312,6 @@ export function SortableChannelRow({
 
         <span className="badge badge-muted" style={{ fontSize: 10 }}>
           {channel.site?.name || 'unknown'}
-        </span>
-
-        <span
-          className="badge"
-          style={{
-            fontSize: 10,
-            background: tokenBinding.badgeTone === 'info'
-              ? 'color-mix(in srgb, var(--color-info) 15%, transparent)'
-              : 'color-mix(in srgb, var(--color-warning) 15%, transparent)',
-            color: tokenBinding.badgeTone === 'info' ? 'var(--color-info)' : 'var(--color-warning)',
-          }}
-        >
-          {tokenBinding.bindingModeLabel}
-        </span>
-
-        <span
-          className="badge"
-          style={{
-            fontSize: 10,
-            background: 'var(--color-info-soft)',
-            color: 'var(--color-info)',
-            maxWidth: 220,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          data-tooltip={suppressTooltips ? undefined : `当前生效：${tokenBinding.effectiveTokenName}`}
-        >
-          当前生效：{tokenBinding.effectiveTokenName}
         </span>
 
         {channel.sourceModel ? (
@@ -524,40 +409,6 @@ export function SortableChannelRow({
 
       {!managementLocked ? (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ minWidth: 220, flex: 1 }}>
-              <ModernSelect
-                size="sm"
-                value={String(activeTokenId || 0)}
-                onChange={(nextValue) => onTokenDraftChange(channel.id, Number.parseInt(nextValue, 10) || 0)}
-                disabled={isUpdatingToken}
-                options={[
-                  {
-                    value: '0',
-                    label: tokenBinding.followOptionLabel,
-                    description: tokenBinding.followOptionDescription,
-                  },
-                  ...tokenOptions.map((token) => ({
-                    value: String(token.id),
-                    label: buildFixedTokenOptionLabel(token, { includeDefaultTag: true }),
-                    description: buildFixedTokenOptionDescription(token),
-                  })),
-                ]}
-                placeholder="选择令牌绑定方式"
-              />
-              <div style={{ marginTop: 3, fontSize: 10.5, color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
-                {tokenBinding.helperText}
-              </div>
-            </div>
-            <button
-              onClick={onSaveToken}
-              disabled={isUpdatingToken}
-              className="btn btn-link btn-link-info"
-            >
-              {isUpdatingToken ? <span className="spinner spinner-sm" /> : '保存'}
-            </button>
-          </div>
-
           <button
             onClick={() => onToggleEnabled(channel.enabled === false)}
             className={`btn btn-link ${channel.enabled === false ? 'btn-link-info' : 'btn-link-warning'}`}

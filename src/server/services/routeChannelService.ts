@@ -9,7 +9,6 @@ export type RouteChannelPriorityUpdate = {
 };
 
 export type RouteChannelInsertCandidate = {
-  tokenId: number | null;
   accountId: number;
   sourceModel: string;
   priority?: number;
@@ -47,11 +46,9 @@ async function withRouteChannelMutation<T>(operation: () => Promise<T>): Promise
 
 function channelPairKey(input: {
   accountId: number;
-  tokenId: number | null | undefined;
   sourceModel: string | null | undefined;
 }): string {
-  const tokenId = typeof input.tokenId === 'number' && Number.isFinite(input.tokenId) ? input.tokenId : 0;
-  return `${input.accountId}::${tokenId}::${(input.sourceModel || '').trim().toLowerCase()}`;
+  return `${input.accountId}::${(input.sourceModel || '').trim().toLowerCase()}`;
 }
 
 function normalizePriority(value: number | null | undefined): number {
@@ -101,7 +98,6 @@ async function insertCandidatesInTransaction(
     const sourceModel = candidate.sourceModel.trim();
     const pairKey = channelPairKey({
       accountId: candidate.accountId,
-      tokenId: candidate.tokenId,
       sourceModel,
     });
     if (existingPairs.has(pairKey)) {
@@ -119,7 +115,7 @@ async function insertCandidatesInTransaction(
       await tx.insert(schema.routeChannels).values({
         routeId,
         accountId: candidate.accountId,
-        tokenId: candidate.tokenId,
+        tokenId: null,
         sourceModel: sourceModel || null,
         priority,
         weight: candidate.weight ?? 10,
@@ -180,7 +176,6 @@ export async function replaceAutomaticRouteChannels(input: {
 export async function createRouteChannel(input: {
   routeId: number;
   accountId: number;
-  tokenId: number | null;
   sourceModel: string | null;
   priority?: number;
   weight?: number;
@@ -189,7 +184,6 @@ export async function createRouteChannel(input: {
   const created = await withRouteChannelMutation<typeof schema.routeChannels.$inferSelect | undefined>(() => db.transaction(async (tx) => {
     const result = await insertCandidatesInTransaction(tx as typeof db, input.routeId, [{
       accountId: input.accountId,
-      tokenId: input.tokenId,
       sourceModel: input.sourceModel || '',
       priority: input.priority,
       weight: input.weight,
@@ -204,7 +198,6 @@ export async function createRouteChannel(input: {
       .all();
     return rows
       .filter((channel) => channel.accountId === input.accountId
-        && (channel.tokenId ?? null) === (input.tokenId ?? null)
         && (channel.sourceModel || '').trim().toLowerCase() === (input.sourceModel || '').trim().toLowerCase())
       .sort((left, right) => right.id - left.id)[0];
   }) as Promise<typeof schema.routeChannels.$inferSelect | undefined>);

@@ -8,7 +8,7 @@ Metapi 是面向 OpenAI、Claude、Gemini 连接的统一代理与路由层。
 
 ## Before You Start / 开始之前
 
-- Check existing [Issues](https://github.com/cita-777/metapi/issues) and [Pull Requests](https://github.com/cita-777/metapi/pulls) to avoid duplicates. / 检查现有的 [Issues](https://github.com/cita-777/metapi/issues) 和 [Pull Requests](https://github.com/cita-777/metapi/pulls) 以避免重复。
+- Check existing [Issues](https://github.com/yang208115/metapi/issues) and [Pull Requests](https://github.com/yang208115/metapi/pulls) to avoid duplicates. / 检查现有的 [Issues](https://github.com/yang208115/metapi/issues) 和 [Pull Requests](https://github.com/yang208115/metapi/pulls) 以避免重复。
 - For major changes, open an issue first to discuss your proposal. / 对于重大更改，请先开启 issue 讨论您的提案。
 - Read our [Code of Conduct](CODE_OF_CONDUCT.md). / 阅读我们的[行为准则](CODE_OF_CONDUCT.md)。
 
@@ -196,9 +196,9 @@ If you're adding support for a new AI API platform / 如果您要添加对新 AI
 
 ## Getting Help / 获取帮助
 
-- 📖 [Documentation](https://metapi.cita777.me) / [文档](https://metapi.cita777.me)
-- 💬 [GitHub Discussions](https://github.com/cita-777/metapi/discussions) / [GitHub 讨论区](https://github.com/cita-777/metapi/discussions)
-- 🐛 [Issue Tracker](https://github.com/cita-777/metapi/issues) / [Issue 跟踪](https://github.com/cita-777/metapi/issues)
+- 📖 [Documentation](https://github.com/yang208115/metapi/tree/main/docs) / [文档](https://github.com/yang208115/metapi/tree/main/docs)
+- 💬 [GitHub Discussions](https://github.com/yang208115/metapi/discussions) / [GitHub 讨论区](https://github.com/yang208115/metapi/discussions)
+- 🐛 [Issue Tracker](https://github.com/yang208115/metapi/issues) / [Issue 跟踪](https://github.com/yang208115/metapi/issues)
 
 ## License / 许可证
 

@@ -1,9 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
-import {
-  ACCOUNT_TOKEN_VALUE_STATUS_READY,
-  isUsableAccountToken,
-} from './accountTokenService.js';
 import { clearRouteDecisionSnapshot, clearRouteDecisionSnapshots } from './routeDecisionSnapshotStore.js';
 import { invalidateTokenRouterCache, matchesModelPattern, normalizeModelAlias } from './tokenRouter.js';
 import { normalizeTokenRouteMode } from '../../shared/tokenRouteContract.js';
@@ -15,7 +11,6 @@ type DbExecutor = Pick<typeof db, 'select' | 'insert' | 'delete'>;
 const MODEL_EXCLUSIONS_SETTING_KEY = 'token_route_deleted_model_exclusions_v1';
 
 type PatternRouteChannelCandidate = {
-  tokenId: number | null;
   accountId: number;
   oauthRouteUnitId: number | null;
   sourceModel: string;
@@ -34,19 +29,6 @@ export type PatternRouteChannelSyncResult = {
 export type RebuildPatternRouteOptions = {
   excludeExactModelPatterns?: string[];
   includeModelPatterns?: string[];
-  /**
-   * Restrict availability-backed candidates to the models that survived the
-   * normal model rebuild filters (whitelist, site disables, and brand rules).
-   * `undefined` means no restriction; an empty array intentionally allows no
-   * availability-backed candidates.
-  */
-  allowedModelNames?: string[];
-  /**
-   * Restrict token-availability candidates to the exact account/token/model
-   * tuples that survived the model rebuild filters. This preserves
-   * per-site filtering when another site still exposes the same model.
-   */
-  allowedAvailabilityCandidateKeys?: string[];
 };
 
 type PatternRouteChannelAffectedRouteSnapshot = {
@@ -58,8 +40,6 @@ type PatternRouteChannelAffectedRouteSnapshot = {
 type SyncPatternRouteChannelsAfterAffectedRouteChangesInput = {
   affectedRouteIds?: number[];
   removedRoutes?: PatternRouteChannelAffectedRouteSnapshot[];
-  allowedModelNames?: string[];
-  allowedAvailabilityCandidateKeys?: string[];
   rebuildAllPatternRoutes?: boolean;
 };
 
@@ -132,24 +112,6 @@ function normalizeModelKey(modelName: string): string {
   return normalizeModelAlias(modelName);
 }
 
-function normalizeAllowedModelKeys(modelNames: string[] | undefined): Set<string> | undefined {
-  if (modelNames === undefined) return undefined;
-  return new Set(modelNames.map(normalizeModelKey).filter(Boolean));
-}
-
-function normalizeAllowedAvailabilityCandidateKeys(keys: string[] | undefined): Set<string> | undefined {
-  if (keys === undefined) return undefined;
-  return new Set(keys.map((key) => key.trim().toLowerCase()).filter(Boolean));
-}
-
-function buildAvailabilityCandidateKey(input: {
-  accountId: number;
-  tokenId: number;
-  modelName: string;
-}): string {
-  return `${input.accountId}:${input.tokenId}:${normalizeModelKey(input.modelName)}`;
-}
-
 async function getPersistedModelExclusions(database: DbExecutor = db): Promise<Set<string>> {
   const row = await database.select({ value: schema.settings.value })
     .from(schema.settings)
@@ -212,7 +174,6 @@ async function clearModelExclusions(
 
 function buildChannelPairKey(input: {
   accountId: number;
-  tokenId: number | null;
   oauthRouteUnitId?: number | null;
   sourceModel: string | null;
 }): string {
@@ -220,57 +181,7 @@ function buildChannelPairKey(input: {
   if (typeof input.oauthRouteUnitId === 'number' && Number.isFinite(input.oauthRouteUnitId) && input.oauthRouteUnitId > 0) {
     return `route-unit:${input.oauthRouteUnitId}::${sourceModel}`;
   }
-  const tokenId = typeof input.tokenId === 'number' && Number.isFinite(input.tokenId) ? input.tokenId : 0;
-  return `account:${input.accountId}::${tokenId}::${sourceModel}`;
-}
-
-async function getPatternTokenCandidates(
-  modelPattern: string,
-  excludedExactModelNames: Set<string>,
-  allowedModelKeys: Set<string> | undefined,
-  allowedAvailabilityCandidateKeys: Set<string> | undefined,
-  database: DbExecutor = db,
-): Promise<PatternRouteChannelCandidate[]> {
-  const rows = await database.select().from(schema.tokenModelAvailability)
-    .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
-    .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-    .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-    .where(
-      and(
-        eq(schema.tokenModelAvailability.available, true),
-        eq(schema.accountTokens.enabled, true),
-        eq(schema.accountTokens.valueStatus, ACCOUNT_TOKEN_VALUE_STATUS_READY),
-        eq(schema.accounts.status, 'active'),
-        eq(schema.sites.status, 'active'),
-      ),
-    )
-    .all();
-
-  const candidates: PatternRouteChannelCandidate[] = [];
-  for (const row of rows) {
-    if (!isUsableAccountToken(row.account_tokens)) continue;
-    const modelName = row.token_model_availability.modelName?.trim();
-    if (!modelName) continue;
-    if (excludedExactModelNames.has(normalizeModelKey(modelName))) continue;
-    if (allowedModelKeys && !allowedModelKeys.has(normalizeModelKey(modelName))) continue;
-    if (allowedAvailabilityCandidateKeys && !allowedAvailabilityCandidateKeys.has(buildAvailabilityCandidateKey({
-      accountId: row.accounts.id,
-      tokenId: row.account_tokens.id,
-      modelName,
-    }))) continue;
-    if (!matchesModelPattern(modelName, modelPattern)) continue;
-    candidates.push({
-      tokenId: row.account_tokens.id,
-      accountId: row.accounts.id,
-      oauthRouteUnitId: null,
-      sourceModel: modelName,
-      priority: 0,
-      weight: 10,
-      enabled: true,
-    });
-  }
-
-  return candidates;
+  return `account:${input.accountId}::${sourceModel}`;
 }
 
 async function getMatchedExactRouteChannelCandidates(
@@ -308,7 +219,6 @@ async function getMatchedExactRouteChannelCandidates(
   return {
     exactModelNames,
     candidates: channels.map((channel) => ({
-      tokenId: channel.tokenId ?? null,
       accountId: channel.accountId,
       oauthRouteUnitId: channel.oauthRouteUnitId ?? null,
       sourceModel: (channel.sourceModel || routeMap.get(channel.routeId)?.modelPattern || '').trim(),
@@ -336,17 +246,7 @@ async function populateRouteChannelsByModelPatternInternal(
     }
   }
   const routeCandidates = await getMatchedExactRouteChannelCandidates(modelPattern, excludedExactModelNames, database);
-  const availabilityExclusions = isExactTokenRouteModelPattern(modelPattern)
-    ? excludedExactModelNames
-    : routeCandidates.exactModelNames;
-  const availabilityCandidates = await getPatternTokenCandidates(
-    modelPattern,
-    availabilityExclusions,
-    normalizeAllowedModelKeys(options.allowedModelNames),
-    normalizeAllowedAvailabilityCandidateKeys(options.allowedAvailabilityCandidateKeys),
-    database,
-  );
-  const candidates = [...routeCandidates.candidates, ...availabilityCandidates];
+  const candidates = routeCandidates.candidates;
   if (candidates.length === 0) return 0;
 
   const existingChannels = await database.select().from(schema.routeChannels)
@@ -354,7 +254,6 @@ async function populateRouteChannelsByModelPatternInternal(
     .all();
   const existingPairs = new Set(existingChannels.map((channel) => buildChannelPairKey({
     accountId: channel.accountId,
-    tokenId: channel.tokenId ?? null,
     oauthRouteUnitId: channel.oauthRouteUnitId ?? null,
     sourceModel: channel.sourceModel,
   })));
@@ -366,7 +265,7 @@ async function populateRouteChannelsByModelPatternInternal(
     await database.insert(schema.routeChannels).values({
       routeId,
       accountId: candidate.accountId,
-      tokenId: candidate.tokenId,
+      tokenId: null,
       oauthRouteUnitId: candidate.oauthRouteUnitId,
       sourceModel: candidate.sourceModel,
       priority: candidate.priority,
@@ -528,8 +427,6 @@ async function syncPatternRouteChannelsAfterAffectedRouteChangesInternal(
     includeModelPatterns: [...affectedExactModelPatterns, ...removedRoutes
       .filter(isExactSourceRoute)
       .map((route) => route.modelPattern)],
-    allowedModelNames: input.allowedModelNames,
-    allowedAvailabilityCandidateKeys: input.allowedAvailabilityCandidateKeys,
   };
   if (rebuildAllPatternRoutes) {
     delete rebuildOptions.includeModelPatterns;

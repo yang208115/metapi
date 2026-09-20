@@ -8,29 +8,19 @@ import { useAnimatedVisibility } from '../components/useAnimatedVisibility.js';
 import { useIsMobile } from '../components/useIsMobile.js';
 import { tr } from '../i18n.js';
 
-type SortColumn = 'name' | 'accountCount' | 'tokenCount' | 'avgLatency' | 'successRate';
+type SortColumn = 'name' | 'accountCount' | 'avgLatency' | 'successRate';
 type ViewMode = 'card' | 'table';
-
-interface ModelTokenInfo {
-  id: number;
-  name: string;
-  isDefault: boolean;
-}
-
-
 
 interface ModelAccountInfo {
   id: number;
   site: string;
   username: string | null;
   latency: number | null;
-  tokens: ModelTokenInfo[];
 }
 
 interface ModelRow {
   name: string;
   accountCount: number;
-  tokenCount: number;
   avgLatency: number | null;
   successRate: number | null;
   description: string | null;
@@ -240,7 +230,6 @@ export default function Models() {
         ...model,
         accounts,
         accountCount: accounts.length,
-        tokenCount: accounts.reduce((sum, account) => sum + account.tokens.length, 0),
         avgLatency: latencyValues.length > 0
           ? Math.round(latencyValues.reduce((sum, latency) => sum + latency, 0) / latencyValues.length)
           : null,
@@ -346,7 +335,6 @@ export default function Models() {
         <div className="filter-panel-title">{tr('排序方式')}</div>
         {[
           { key: 'accountCount' as SortColumn, label: tr('账号数') },
-          { key: 'tokenCount' as SortColumn, label: tr('令牌数') },
           { key: 'avgLatency' as SortColumn, label: tr('延迟') },
           { key: 'successRate' as SortColumn, label: tr('成功率') },
           { key: 'name' as SortColumn, label: tr('名称') },
@@ -542,10 +530,6 @@ export default function Models() {
                         <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         {m.accountCount} {tr('个账号')}
                       </span>
-                      <span>
-                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
-                        {m.tokenCount} {tr('令牌')}
-                      </span>
                       <span
                         className={`badge ${getLatencyBadgeClass(m.avgLatency)}`}
                         style={{ fontVariantNumeric: 'tabular-nums' }}
@@ -651,16 +635,6 @@ export default function Models() {
                                   {a.latency != null ? `${a.latency}ms` : '—'}
                                 </span>
                               </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
-                              </div>
-                              <div style={{ display: 'grid', gap: 6 }}>
-                                <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{tr('令牌')}</span>
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                  {a.tokens.length > 0 ? a.tokens.map((t) => (
-                                    <span key={t.id} className={`badge ${t.isDefault ? 'badge-success' : 'badge-muted'}`} style={{ fontSize: 11 }}>{t.name}</span>
-                                  )) : <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>—</span>}
-                                </div>
-                              </div>
                             </div>
                           </div>
                         ))}
@@ -671,7 +645,6 @@ export default function Models() {
                           <tr>
                             <th style={{ fontWeight: 500 }}>{tr('站点')}</th>
                             <th style={{ fontWeight: 500 }}>{tr('账号')}</th>
-                            <th style={{ fontWeight: 500 }}>{tr('令牌')}</th>
                             <th style={{ fontWeight: 500 }}>{tr('延迟')}</th>
                           </tr>
                         </thead>
@@ -680,11 +653,6 @@ export default function Models() {
                             <tr key={a.id}>
                               <td><span className="badge badge-info" style={{ fontSize: 11 }}>{a.site}</span></td>
                               <td style={{ fontSize: 12 }}>{a.username || `ID:${a.id}`}</td>
-                              <td style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                {a.tokens.length > 0 ? a.tokens.map(t => (
-                                  <span key={t.id} className={`badge ${t.isDefault ? 'badge-success' : 'badge-muted'}`} style={{ fontSize: 11 }}>{t.name}</span>
-                                )) : <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
-                              </td>
                               <td>
                                 {a.latency != null ? (
                                   <span style={{ color: getMetricColor(a.latency), fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{a.latency}ms</span>
@@ -716,9 +684,6 @@ export default function Models() {
                   <th style={{ cursor: 'pointer' }} onClick={() => { setSortBy('accountCount'); setSortDir(d => d === 'asc' ? 'desc' : 'asc'); }}>
                     {tr('账号数')} {sortBy === 'accountCount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => { setSortBy('tokenCount'); setSortDir(d => d === 'asc' ? 'desc' : 'asc'); }}>
-                    {tr('令牌数')} {sortBy === 'tokenCount' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
-                  </th>
                   <th style={{ cursor: 'pointer' }} onClick={() => { setSortBy('avgLatency'); setSortDir(d => d === 'asc' ? 'desc' : 'asc'); }}>
                     {tr('延迟')} {sortBy === 'avgLatency' ? (sortDir === 'desc' ? '↓' : '↑') : ''}
                   </th>
@@ -743,7 +708,6 @@ export default function Models() {
                         </code>
                       </td>
                       <td><span className="badge badge-info">{m.accountCount}</span></td>
-                      <td><span className="badge badge-muted">{m.tokenCount}</span></td>
                       <td>
                         <span
                           className={`badge ${getLatencyBadgeClass(m.avgLatency)}`}
@@ -805,7 +769,6 @@ export default function Models() {
                               <thead><tr style={{ color: 'var(--color-text-muted)' }}>
                                 <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500 }}>{tr('站点')}</th>
                                 <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500 }}>{tr('账号')}</th>
-                                <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500 }}>{tr('令牌')}</th>
                                 <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 500 }}>{tr('延迟')}</th>
                               </tr></thead>
                               <tbody>
@@ -813,11 +776,6 @@ export default function Models() {
                                   <tr key={a.id} style={{ borderTop: '1px solid var(--color-border-light)' }}>
                                     <td style={{ padding: 8 }}><span className="badge badge-info" style={{ fontSize: 11 }}>{a.site}</span></td>
                                     <td style={{ padding: 8 }}>{a.username || `ID:${a.id}`}</td>
-                                    <td style={{ padding: 8, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                      {a.tokens.length > 0 ? a.tokens.map(t => (
-                                        <span key={t.id} className={`badge ${t.isDefault ? 'badge-success' : 'badge-info'}`}>{t.name}</span>
-                                      )) : '—'}
-                                    </td>
                                     <td style={{ padding: 8, color: a.latency != null ? getMetricColor(a.latency) : 'var(--color-text-muted)' }}>
                                       {a.latency != null ? `${a.latency}ms` : '—'}
                                     </td>

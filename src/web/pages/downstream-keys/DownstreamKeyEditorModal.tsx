@@ -4,14 +4,7 @@ import { generateDownstreamSkKey } from '../helpers/generateDownstreamSkKey.js';
 
 const PROXY_TOKEN_PREFIX = 'sk-';
 
-export type DownstreamExcludedCredentialRef =
-  | {
-    kind: 'account_token';
-    siteId: number;
-    accountId: number;
-    tokenId: number;
-  }
-  | {
+export type DownstreamExcludedCredentialRef = {
     kind: 'default_api_key';
     siteId: number;
     accountId: number;
@@ -27,6 +20,7 @@ export type DownstreamKeyEditorForm = {
   maxRequests: string;
   expiresAt: string;
   enabled: boolean;
+  permissionScopeMode?: 'all' | 'custom';
   selectedModels: string[];
   selectedGroupRouteIds: number[];
   siteWeightMultipliersText: string;
@@ -120,9 +114,7 @@ function tagChipStyle(kind: 'normal' | 'accent' = 'normal'): React.CSSProperties
 }
 
 function buildExcludedCredentialRefKey(ref: DownstreamExcludedCredentialRef): string {
-  return ref.kind === 'account_token'
-    ? `${ref.kind}:${ref.siteId}:${ref.accountId}:${ref.tokenId}`
-    : `${ref.kind}:${ref.siteId}:${ref.accountId}`;
+  return `${ref.kind}:${ref.siteId}:${ref.accountId}`;
 }
 
 function normalizeExcludedSiteIds(values: number[]): number[] {
@@ -133,17 +125,6 @@ function normalizeExcludedCredentialRefs(values: DownstreamExcludedCredentialRef
   const deduped = new Map<string, DownstreamExcludedCredentialRef>();
   for (const value of values) {
     if (!value || !Number.isFinite(value.siteId) || !Number.isFinite(value.accountId)) continue;
-    if (value.kind === 'account_token') {
-      if (!Number.isFinite(value.tokenId)) continue;
-      const normalized: DownstreamExcludedCredentialRef = {
-        kind: 'account_token',
-        siteId: Math.trunc(value.siteId),
-        accountId: Math.trunc(value.accountId),
-        tokenId: Math.trunc(value.tokenId),
-      };
-      deduped.set(buildExcludedCredentialRefKey(normalized), normalized);
-      continue;
-    }
     const normalized: DownstreamExcludedCredentialRef = {
       kind: 'default_api_key',
       siteId: Math.trunc(value.siteId),
@@ -443,9 +424,48 @@ export default function DownstreamKeyEditorModal({
         <div className="downstream-key-modal-help">标签用于搜索、筛选和辅助归类，不影响路由与权限。</div>
       </div>
 
+      <div className="downstream-key-modal-field downstream-key-modal-field-full" style={{ padding: '12px 14px', background: 'var(--color-bg-card)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border-light)' }}>
+        <div className="downstream-key-modal-label" style={{ marginBottom: 8, fontSize: 13, fontWeight: 600 }}>模型权限范围</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+            <input
+              type="radio"
+              name="permissionScopeMode"
+              checked={form.permissionScopeMode !== 'custom'}
+              onChange={() => onChange((prev) => ({ ...prev, permissionScopeMode: 'all' }))}
+            />
+            <span style={{ fontWeight: form.permissionScopeMode !== 'custom' ? 600 : 400 }}>
+              全部可用模型（推荐）
+            </span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+            <input
+              type="radio"
+              name="permissionScopeMode"
+              checked={form.permissionScopeMode === 'custom'}
+              onChange={() => onChange((prev) => ({ ...prev, permissionScopeMode: 'custom' }))}
+            />
+            <span style={{ fontWeight: form.permissionScopeMode === 'custom' ? 600 : 400 }}>
+              指定模型与群组
+            </span>
+          </label>
+        </div>
+        {form.permissionScopeMode !== 'custom' ? (
+          <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+            ✔ 客户端可调用当前系统中所有已生效路由的模型，并在上游新增模型时自动可用。
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: (selectedModelCount + selectedGroupCount === 0) ? 'var(--color-danger)' : 'var(--color-primary)', lineHeight: 1.5, fontWeight: (selectedModelCount + selectedGroupCount === 0) ? 600 : 400 }}>
+            {selectedModelCount + selectedGroupCount === 0
+              ? '⚠️ 提示：指定模式下必须至少勾选一个模型或群组，未勾选禁止保存，防止误放开全部权限。请在下方勾选：'
+              : `已指定 ${selectedModelCount} 个模型、${selectedGroupCount} 个群组路由。可在下方调整授权项：`}
+          </div>
+        )}
+      </div>
+
       <div className="downstream-key-advanced">
         <button type="button" className={`downstream-key-advanced-toggle ${advancedOpen ? 'is-open' : ''}`.trim()} onClick={() => setAdvancedOpen((value) => !value)}>
-          <span>高级配置</span>
+          <span>高级配置（站点倍率、排除项等）</span>
           <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{advancedOpen ? '收起' : '展开'}</span>
         </button>
         {advancedOpen ? (
@@ -600,8 +620,8 @@ export default function DownstreamKeyEditorModal({
               <div className="downstream-key-advanced-panel">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div>
-                    <div className="downstream-key-modal-section-title">排除 API Key/令牌</div>
-                    <div className="downstream-key-modal-help">支持排除显式令牌，以及 `tokenId` 为空时实际使用的默认 API Key。</div>
+                    <div className="downstream-key-modal-section-title">排除账号 API Key</div>
+                    <div className="downstream-key-modal-help">被排除的账号 API Key 不参与当前下游密钥的通道路由。</div>
                   </div>
                   <button type="button" className="btn btn-ghost" style={{ border: '1px solid var(--color-border)' }} onClick={() => onChange((prev) => ({ ...prev, excludedCredentialRefs: [] }))}>清空</button>
                 </div>
@@ -610,13 +630,13 @@ export default function DownstreamKeyEditorModal({
                   <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
-                  <input value={credentialSearch} onChange={(e) => setCredentialSearch(e.target.value)} placeholder="搜索站点 / 账号 / 令牌" />
+                  <input value={credentialSearch} onChange={(e) => setCredentialSearch(e.target.value)} placeholder="搜索站点 / 账号 / API Key" />
                 </div>
                 <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {exclusionSourceLoading ? (
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>加载站点与令牌中...</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>加载站点与账号中...</div>
                   ) : filteredCredentials.length === 0 ? (
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>暂无可排除 API Key/令牌</div>
+                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>暂无可排除的账号 API Key</div>
                   ) : filteredCredentials.map((item) => {
                     const checked = form.excludedCredentialRefs.some((ref) => buildExcludedCredentialRefKey(ref) === buildExcludedCredentialRefKey(item.ref));
                     return (

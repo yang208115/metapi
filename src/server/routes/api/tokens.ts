@@ -5,10 +5,6 @@ import { db, schema } from '../../db/index.js';
 import { requireInsertedRowId } from '../../db/insertHelpers.js';
 import * as routeRefreshWorkflow from '../../services/routeRefreshWorkflow.js';
 import {
-  ACCOUNT_TOKEN_VALUE_STATUS_READY,
-  isUsableAccountToken,
-} from '../../services/accountTokenService.js';
-import {
   DEFAULT_ROUTE_ROUTING_STRATEGY,
   normalizeRouteRoutingStrategy,
   type RouteRoutingStrategy,
@@ -280,57 +276,6 @@ async function clearDependentExplicitGroupSnapshotsBySourceRouteIds(sourceRouteI
   await clearRouteDecisionSnapshots(dependentRouteIds);
 }
 
-async function getDefaultTokenId(accountId: number): Promise<number | null> {
-  const token = await db.select().from(schema.accountTokens)
-    .where(and(
-      eq(schema.accountTokens.accountId, accountId),
-      eq(schema.accountTokens.enabled, true),
-      eq(schema.accountTokens.isDefault, true),
-      eq(schema.accountTokens.valueStatus, ACCOUNT_TOKEN_VALUE_STATUS_READY),
-    ))
-    .get();
-  return isUsableAccountToken(token ?? null) ? token!.id : null;
-}
-
-function canonicalModelAlias(modelName: string): string {
-  const normalized = modelName.trim().toLowerCase();
-  if (!normalized) return '';
-  const slashIndex = normalized.lastIndexOf('/');
-  if (slashIndex >= 0 && slashIndex < normalized.length - 1) {
-    return normalized.slice(slashIndex + 1);
-  }
-  return normalized;
-}
-
-function isModelAliasEquivalent(left: string, right: string): boolean {
-  const a = canonicalModelAlias(left);
-  const b = canonicalModelAlias(right);
-  return !!a && !!b && a === b;
-}
-
-async function tokenSupportsModel(tokenId: number, modelName: string): Promise<boolean> {
-  const rows = await db.select().from(schema.tokenModelAvailability)
-    .where(
-      and(
-        eq(schema.tokenModelAvailability.tokenId, tokenId),
-        eq(schema.tokenModelAvailability.available, true),
-      ),
-    )
-    .all();
-  return rows.some((row) => {
-    const availableModelName = row.modelName?.trim();
-    if (!availableModelName) return false;
-    return availableModelName === modelName || isModelAliasEquivalent(availableModelName, modelName);
-  });
-}
-
-async function checkTokenBelongsToAccount(tokenId: number, accountId: number): Promise<boolean> {
-  const row = await db.select().from(schema.accountTokens)
-    .where(and(eq(schema.accountTokens.id, tokenId), eq(schema.accountTokens.accountId, accountId)))
-    .get();
-  return isUsableAccountToken(row ?? null);
-}
-
 type BatchChannelPriorityUpdate = {
   id: number;
   priority: number;
@@ -560,7 +505,6 @@ async function fetchChannelsForRouteRows(
   const channelRows = await db.select().from(schema.routeChannels)
     .innerJoin(schema.accounts, eq(schema.routeChannels.accountId, schema.accounts.id))
     .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-    .leftJoin(schema.accountTokens, eq(schema.routeChannels.tokenId, schema.accountTokens.id))
     .where(inArray(schema.routeChannels.routeId, actualRouteIds))
     .all();
 
@@ -579,6 +523,7 @@ async function fetchChannelsForRouteRows(
   const channelsByActualRouteId = new Map<number, any[]>();
 
   for (const row of channelRows) {
+    const { tokenId: _legacyTokenId, ...publicChannel } = row.route_channels;
     const routeId = row.route_channels.routeId;
     const actualRoute = actualRouteById.get(routeId);
     const fallbackSourceModel = actualRoute && !isExplicitGroupRoute(actualRoute) && isExactModelPattern(actualRoute.modelPattern)
@@ -590,19 +535,10 @@ async function fetchChannelsForRouteRows(
       ? routeUnitSummaries.get(row.route_channels.oauthRouteUnitId) || null
       : null;
     channelsByActualRouteId.get(routeId)!.push({
-      ...row.route_channels,
+      ...publicChannel,
       sourceModel: resolvedSourceModel || null,
       account: row.accounts,
       site: row.sites,
-      token: row.account_tokens
-        ? {
-          id: row.account_tokens.id,
-          name: row.account_tokens.name,
-          accountId: row.account_tokens.accountId,
-          enabled: row.account_tokens.enabled,
-          isDefault: row.account_tokens.isDefault,
-        }
-        : null,
       routeUnit: includeRouteUnitDetails && routeUnit
         ? {
           id: routeUnit.id,
@@ -763,7 +699,6 @@ export async function tokensRoutes(app: FastifyInstance) {
 
     const candidates: Array<{
       accountId: number;
-      tokenId: number | null;
       sourceModel: string;
       priority?: number;
       weight?: number;
@@ -775,15 +710,8 @@ export async function tokensRoutes(app: FastifyInstance) {
       const sourceModel = typeof item.sourceModel === 'string'
         ? item.sourceModel.trim()
         : (isExactModelPattern(route.modelPattern) ? route.modelPattern.trim() : '');
-      const effectiveTokenId = item.tokenId ?? await getDefaultTokenId(item.accountId);
-
-      if (item.tokenId && !await checkTokenBelongsToAccount(item.tokenId, item.accountId)) {
-        errors.push(`令牌 ${item.tokenId} 不属于账号 ${item.accountId}`);
-        continue;
-      }
       candidates.push({
         accountId: item.accountId,
-        tokenId: effectiveTokenId,
         sourceModel,
         weight: 10,
         enabled: true,
@@ -1217,22 +1145,11 @@ export async function tokensRoutes(app: FastifyInstance) {
     const sourceModel = typeof body.sourceModel === 'string'
       ? body.sourceModel.trim()
       : (isExactModelPattern(route.modelPattern) ? route.modelPattern.trim() : '');
-    const effectiveTokenId = body.tokenId ?? await getDefaultTokenId(body.accountId);
-
-    if (body.tokenId && !await checkTokenBelongsToAccount(body.tokenId, body.accountId)) {
-      return reply.code(400).send({ success: false, message: '令牌不存在或不属于当前账号' });
-    }
-
-    if (isExactModelPattern(route.modelPattern) && effectiveTokenId && !await tokenSupportsModel(effectiveTokenId, route.modelPattern)) {
-      return reply.code(400).send({ success: false, message: '该令牌不支持当前模型' });
-    }
-
     const duplicate = (await db.select().from(schema.routeChannels)
       .where(eq(schema.routeChannels.routeId, routeId))
       .all())
       .some((channel) =>
         channel.accountId === body.accountId
-        && (channel.tokenId ?? null) === (body.tokenId ?? null)
         && (channel.sourceModel || '').trim().toLowerCase() === sourceModel.toLowerCase(),
       );
     if (duplicate) {
@@ -1244,7 +1161,6 @@ export async function tokensRoutes(app: FastifyInstance) {
       created = await createRouteChannel({
         routeId,
         accountId: body.accountId,
-        tokenId: effectiveTokenId,
         sourceModel: sourceModel || null,
         priority: body.priority,
         weight: body.weight,
@@ -1303,21 +1219,6 @@ export async function tokensRoutes(app: FastifyInstance) {
       return reply.code(404).send({ success: false, message: '路由不存在' });
     }
 
-    if (body.tokenId !== undefined && body.tokenId !== null) {
-      const tokenId = Number(body.tokenId);
-      if (!Number.isFinite(tokenId) || !await checkTokenBelongsToAccount(tokenId, channel.accountId)) {
-        return reply.code(400).send({ success: false, message: '令牌不存在或不属于通道账号' });
-      }
-    }
-
-    const nextTokenId = body.tokenId === undefined
-      ? (channel.tokenId ?? await getDefaultTokenId(channel.accountId))
-      : (body.tokenId === null ? await getDefaultTokenId(channel.accountId) : Number(body.tokenId));
-
-    if (isExactModelPattern(route.modelPattern) && nextTokenId && !await tokenSupportsModel(nextTokenId, route.modelPattern)) {
-      return reply.code(400).send({ success: false, message: '该令牌不支持当前模型' });
-    }
-
     const updates: Record<string, unknown> = { manualOverride: true };
     if (body.sourceModel !== undefined) {
       if (body.sourceModel === null) updates.sourceModel = null;
@@ -1327,7 +1228,6 @@ export async function tokensRoutes(app: FastifyInstance) {
     if (body.priority !== undefined) updates.priority = body.priority;
     if (body.weight !== undefined) updates.weight = body.weight;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
-    if (body.tokenId !== undefined) updates.tokenId = nextTokenId;
 
     await db.update(schema.routeChannels).set(updates).where(eq(schema.routeChannels.id, channelId)).run();
     await clearRouteDecisionSnapshot(channel.routeId);

@@ -1,7 +1,7 @@
 {
   "name": "metapi",
   "version": "1.3.0",
-  "description": "Meta-layer management and unified proxy for AI API aggregation platforms",
+  "description": "Refactored self-hosted gateway for AI API aggregation, routing, and observability",
   "keywords": [
     "ai",
     "api-gateway",
@@ -11,13 +11,13 @@
     "claude",
     "aggregator"
   ],
-  "homepage": "https://github.com/cita-777/metapi#readme",
+  "homepage": "https://github.com/yang208115/metapi#readme",
   "bugs": {
-    "url": "https://github.com/cita-777/metapi/issues"
+    "url": "https://github.com/yang208115/metapi/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cita-777/metapi.git"
+    "url": "git+https://github.com/yang208115/metapi.git"
   },
   "license": "MIT",
   "engines": {
@@ -33,6 +33,8 @@
     "typecheck:web": "tsc -p tsconfig.web.json",
     "typecheck:server": "tsc --noEmit -p tsconfig.server.json",
     "typecheck": "npm run typecheck:web && npm run typecheck:server",
+    "test": "node --import tsx --test scripts/tests/*.test.ts",
+    "test:watch": "node --import tsx --test --watch scripts/tests/*.test.ts",
     "docs:dev": "vitepress dev docs --host 0.0.0.0 --port 4173",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs --host 0.0.0.0 --port 4173",

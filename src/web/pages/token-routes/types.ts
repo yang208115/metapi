@@ -9,12 +9,6 @@ export type GroupFilter = null | '__all__' | number;
 export type RouteRoutingStrategy = 'weighted' | 'round_robin' | 'stable_first';
 export type OAuthRouteUnitStrategy = 'round_robin' | 'stick_until_unavailable';
 export type RouteRowKind = 'persisted' | 'zero_channel';
-export type RouteChannelDraft = {
-  accountId: number;
-  tokenId: number;
-  sourceModel: string;
-};
-
 export type RouteChannelRouteUnitMember = {
   accountId: number;
   username: string | null;
@@ -33,7 +27,6 @@ export type RouteChannel = {
   id: number;
   routeId?: number;
   accountId: number;
-  tokenId: number | null;
   sourceModel?: string | null;
   priority: number;
   weight: number;
@@ -53,13 +46,6 @@ export type RouteChannel = {
     name: string | null;
     platform: string | null;
   };
-  token?: {
-    id: number;
-    name: string;
-    accountId: number;
-    enabled: boolean;
-    isDefault: boolean;
-  } | null;
   oauthRouteUnitId?: number | null;
   routeUnit?: RouteChannelRouteUnit | null;
 };
@@ -106,13 +92,6 @@ export type ChannelDecisionState = {
   reasonColor: string;
 };
 
-export type RouteTokenOption = {
-  id: number;
-  name: string;
-  isDefault: boolean;
-  sourceModel?: string;
-};
-
 export type RouteIconOption = {
   value: string;
   label: string;
@@ -120,24 +99,6 @@ export type RouteIconOption = {
   iconNode?: ReactNode;
   iconUrl?: string;
   iconText?: string;
-};
-
-export type MissingTokenRouteSiteActionItem = {
-  key: string;
-  siteName: string;
-  accountId: number;
-  accountLabel: string;
-};
-
-export type MissingTokenGroupRouteSiteActionItem = {
-  key: string;
-  siteName: string;
-  accountId: number;
-  accountLabel: string;
-  missingGroups: string[];
-  requiredGroups: string[];
-  availableGroups: string[];
-  groupCoverageUncertain?: boolean;
 };
 
 export type SortableChannelRowProps = {
@@ -155,11 +116,6 @@ export type SortableChannelRowProps = {
   channelManagementDisabled?: boolean;
   dragInProgress?: boolean;
   mobile?: boolean;
-  tokenOptions: RouteTokenOption[];
-  activeTokenId: number;
-  isUpdatingToken: boolean;
-  onTokenDraftChange: (channelId: number, tokenId: number) => void;
-  onSaveToken: () => void;
   onDeleteChannel: () => void;
   onToggleEnabled: (enabled: boolean) => void;
   onSiteBlockModel?: () => void;

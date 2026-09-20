@@ -1,20 +1,9 @@
 import { refreshBalance } from './balanceService.js';
 import {
-  ensureDefaultTokenForAccount,
-  syncTokensFromUpstream,
-} from './accountTokenService.js';
-import {
   refreshModelsForAccount,
   type ModelRefreshResult,
 } from './modelService.js';
 import * as routeRefreshWorkflow from './routeRefreshWorkflow.js';
-
-type UpstreamTokenLike = {
-  name?: string | null;
-  key?: string | null;
-  enabled?: boolean | null;
-  tokenGroup?: string | null;
-};
 
 export type CoverageBatchRebuildResult =
   | { success: true; result: Awaited<ReturnType<typeof routeRefreshWorkflow.rebuildRoutesOnly>> }
@@ -26,18 +15,12 @@ export async function rebuildRoutesBestEffort(): Promise<boolean> {
 
 export async function convergeAccountMutation(input: {
   accountId: number;
-  preferredApiToken?: string | null;
-  defaultTokenSource?: string;
-  ensurePreferredTokenBeforeSync?: boolean;
-  upstreamTokens?: UpstreamTokenLike[];
   refreshBalance?: boolean;
   refreshModels?: boolean;
   allowInactiveModelRefresh?: boolean;
   rebuildRoutes?: boolean;
   continueOnError?: boolean;
 }): Promise<{
-  defaultTokenId: number | null;
-  tokenSync: Awaited<ReturnType<typeof syncTokensFromUpstream>> | null;
   refreshedBalance: boolean;
   refreshedModels: boolean;
   rebuiltRoutes: boolean;
@@ -46,8 +29,6 @@ export async function convergeAccountMutation(input: {
   rebuildResult: Awaited<ReturnType<typeof routeRefreshWorkflow.rebuildRoutesOnly>> | null;
 }> {
   const result = {
-    defaultTokenId: null as number | null,
-    tokenSync: null as Awaited<ReturnType<typeof syncTokensFromUpstream>> | null,
     refreshedBalance: false,
     refreshedModels: false,
     rebuiltRoutes: false,
@@ -64,44 +45,6 @@ export async function convergeAccountMutation(input: {
       return null;
     }
   };
-
-  if (input.ensurePreferredTokenBeforeSync && input.preferredApiToken?.trim()) {
-    const defaultTokenId = await runStep(() => ensureDefaultTokenForAccount(
-      input.accountId,
-      input.preferredApiToken!,
-      { name: 'default', source: input.defaultTokenSource || 'manual' },
-    ));
-    if (defaultTokenId != null) {
-      result.defaultTokenId = defaultTokenId;
-    }
-  }
-
-  if ((input.upstreamTokens?.length || 0) > 0) {
-    const tokenSync = await runStep(() => syncTokensFromUpstream(input.accountId, input.upstreamTokens!));
-    if (tokenSync) {
-      result.tokenSync = tokenSync;
-      result.defaultTokenId = tokenSync.defaultTokenId ?? result.defaultTokenId;
-    }
-    if (!input.ensurePreferredTokenBeforeSync && input.preferredApiToken?.trim()) {
-      const defaultTokenId = await runStep(() => ensureDefaultTokenForAccount(
-        input.accountId,
-        input.preferredApiToken!,
-        { name: 'default', source: input.defaultTokenSource || 'manual' },
-      ));
-      if (defaultTokenId != null) {
-        result.defaultTokenId = defaultTokenId;
-      }
-    }
-  } else if (!input.ensurePreferredTokenBeforeSync && input.preferredApiToken?.trim()) {
-    const defaultTokenId = await runStep(() => ensureDefaultTokenForAccount(
-      input.accountId,
-      input.preferredApiToken!,
-      { name: 'default', source: input.defaultTokenSource || 'manual' },
-    ));
-    if (defaultTokenId != null) {
-      result.defaultTokenId = defaultTokenId;
-    }
-  }
 
   if (input.refreshBalance) {
     const balanceResult = await runStep(() => refreshBalance(input.accountId));

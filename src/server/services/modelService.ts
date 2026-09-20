@@ -5,21 +5,13 @@ import { db, schema } from '../db/index.js';
 import { getInsertedRowId } from '../db/insertHelpers.js';
 import { getAdapter } from './platforms/index.js';
 import {
-  ACCOUNT_TOKEN_VALUE_STATUS_READY,
-  ensureDefaultTokenForAccount,
-  getPreferredAccountToken,
-  isMaskedTokenValue,
-  isUsableAccountToken,
-} from './accountTokenService.js';
-import {
   getCredentialModeFromExtraConfig,
   mergeAccountExtraConfig,
   resolveProxyUrlFromExtraConfig,
-  requiresManagedAccountTokens,
   resolvePlatformUserId,
   supportsDirectAccountRoutingConnection,
 } from './accountExtraConfig.js';
-import { invalidateTokenRouterCache, normalizeModelAlias } from './tokenRouter.js';
+import { invalidateTokenRouterCache } from './tokenRouter.js';
 import { getBlockedBrandRules, isModelBlockedByBrand } from './brandMatcher.js';
 import { config } from '../config.js';
 import { setAccountRuntimeHealth } from './accountHealthService.js';
@@ -48,6 +40,11 @@ import {
 const API_TOKEN_DISCOVERY_TIMEOUT_MS = 8_000;
 const MODEL_DISCOVERY_TIMEOUT_MS = 12_000;
 const MODEL_REFRESH_BATCH_SIZE = 3;
+
+function isMaskedCredentialValue(value: string | null | undefined): boolean {
+  const normalized = (value || '').trim();
+  return normalized.includes('*') || normalized.includes('•');
+}
 
 export type RebuildTokenRoutesOptions = {
   /** Rebuild every enabled pattern group even when exact-route topology is unchanged. */
@@ -371,12 +368,6 @@ async function refreshModelsForAccountInternal(
   const previousModelContextLengths = restoreAvailabilityOnFailure
     ? new Map(getAllModelContextLengths(modelContextScope))
     : null;
-  const previousAccountTokens = restoreAvailabilityOnFailure
-    ? await db.select()
-      .from(schema.accountTokens)
-      .where(eq(schema.accountTokens.accountId, accountId))
-      .all()
-    : [];
   const previousModelAvailability = restoreAvailabilityOnFailure
     ? await db.select()
       .from(schema.modelAvailability)
@@ -386,13 +377,6 @@ async function refreshModelsForAccountInternal(
       ))
       .all()
     : [];
-  const previousTokenModelAvailability = restoreAvailabilityOnFailure
-    ? (await Promise.all(previousAccountTokens.map(async (token) => db.select()
-      .from(schema.tokenModelAvailability)
-      .where(eq(schema.tokenModelAvailability.tokenId, token.id))
-      .all()))).flat()
-    : [];
-
   const clearExistingAvailability = async () => {
     await db.delete(schema.modelAvailability)
       .where(and(
@@ -401,16 +385,6 @@ async function refreshModelsForAccountInternal(
       ))
       .run();
 
-    const currentAccountTokens = await db.select({ id: schema.accountTokens.id })
-      .from(schema.accountTokens)
-      .where(eq(schema.accountTokens.accountId, accountId))
-      .all();
-
-    for (const token of currentAccountTokens) {
-      await db.delete(schema.tokenModelAvailability)
-        .where(eq(schema.tokenModelAvailability.tokenId, token.id))
-        .run();
-    }
   };
 
   const restorePreviousAvailability = async () => {
@@ -419,11 +393,6 @@ async function refreshModelsForAccountInternal(
     if (previousModelAvailability.length > 0) {
       await db.insert(schema.modelAvailability).values(
         previousModelAvailability.map(({ id: _id, ...row }) => row),
-      ).run();
-    }
-    if (previousTokenModelAvailability.length > 0) {
-      await db.insert(schema.tokenModelAvailability).values(
-        previousTokenModelAvailability.map(({ id: _id, ...row }) => row),
       ).run();
     }
   };
@@ -764,8 +733,7 @@ async function refreshModelsForAccountInternal(
         API_TOKEN_DISCOVERY_TIMEOUT_MS,
         `api token discovery timeout (${Math.round(API_TOKEN_DISCOVERY_TIMEOUT_MS / 1000)}s)`,
       );
-      if (discoveredApiToken && !isMaskedTokenValue(discoveredApiToken)) {
-        await ensureDefaultTokenForAccount(account.id, discoveredApiToken, { name: 'default', source: 'sync' });
+      if (discoveredApiToken && !isMaskedCredentialValue(discoveredApiToken)) {
         await db.update(schema.accounts).set({
           apiToken: discoveredApiToken,
           updatedAt: new Date().toISOString(),
@@ -774,36 +742,6 @@ async function refreshModelsForAccountInternal(
         discoveredApiToken = null;
       }
     } catch { }
-  }
-
-  const usesManagedTokens = requiresManagedAccountTokens(account);
-  let enabledTokens = usesManagedTokens
-    ? await db.select()
-      .from(schema.accountTokens)
-      .where(and(
-        eq(schema.accountTokens.accountId, account.id),
-        eq(schema.accountTokens.enabled, true),
-        eq(schema.accountTokens.valueStatus, ACCOUNT_TOKEN_VALUE_STATUS_READY),
-      ))
-      .all()
-    : [];
-  enabledTokens = enabledTokens.filter(isUsableAccountToken);
-
-  // Last fallback: if still no managed token but account has a legacy apiToken, mirror it into token table.
-  if (usesManagedTokens && enabledTokens.length === 0) {
-    const fallback = discoveredApiToken || account.apiToken || null;
-    if (fallback) {
-      await ensureDefaultTokenForAccount(account.id, fallback, { name: 'default', source: 'legacy' });
-      enabledTokens = await db.select()
-        .from(schema.accountTokens)
-        .where(and(
-          eq(schema.accountTokens.accountId, account.id),
-          eq(schema.accountTokens.enabled, true),
-          eq(schema.accountTokens.valueStatus, ACCOUNT_TOKEN_VALUE_STATUS_READY),
-        ))
-        .all();
-      enabledTokens = enabledTokens.filter(isUsableAccountToken);
-    }
   }
 
   let aiBaseUrl: string;
@@ -874,7 +812,7 @@ async function refreshModelsForAccountInternal(
   const discoverModelsWithCredential = async (credentialRaw: string | null | undefined) => {
     const credential = (credentialRaw || '').trim();
     if (!credential) return;
-    if (isMaskedTokenValue(credential)) return;
+    if (isMaskedCredentialValue(credential)) return;
     if (attemptedCredentials.has(credential)) return;
     attemptedCredentials.add(credential);
 
@@ -907,47 +845,6 @@ async function refreshModelsForAccountInternal(
   await discoverModelsWithCredential(account.apiToken);
   await discoverModelsWithCredential(discoveredApiToken);
   await discoverModelsWithCredential(account.accessToken);
-
-  for (const token of enabledTokens) {
-    const startedAt = Date.now();
-    const tokenContextScope = beginModelContextScanScope();
-    let models: string[] = [];
-
-    try {
-      models = normalizeModels(
-        await withTimeout(
-          () => withAccountProxyOverride(accountProxyUrl,
-            () => adapter.getModels(aiBaseUrl, token.token, platformUserId, tokenContextScope)),
-          MODEL_DISCOVERY_TIMEOUT_MS,
-          `model discovery timeout (${Math.round(MODEL_DISCOVERY_TIMEOUT_MS / 1000)}s)`,
-          () => clearModelContextLengthCache(tokenContextScope),
-        ),
-      );
-    } catch (err) {
-      recordFailure(err);
-      models = [];
-    } finally {
-      collectModelContextLengthsFromScope(tokenContextScope);
-    }
-
-    if (models.length === 0) continue;
-
-    const latencyMs = Date.now() - startedAt;
-    const checkedAt = new Date().toISOString();
-
-    await db.insert(schema.tokenModelAvailability).values(
-      models.map((modelName) => ({
-        tokenId: token.id,
-        modelName,
-        available: true,
-        latencyMs,
-        checkedAt,
-      })),
-    ).run();
-
-    scannedTokenCount++;
-    mergeDiscoveredModels(models, latencyMs);
-  }
 
   if (accountModels.size === 0) {
     // A failed refresh must not leave context lengths from a previous scan in
@@ -1010,7 +907,7 @@ async function refreshModelsForAccountInternal(
     accountId,
     modelCount: accountModels.size,
     modelsPreview,
-    tokenScanned: scannedTokenCount,
+    tokenScanned: 0,
     discoveredByCredential,
     discoveredApiToken: !!discoveredApiToken,
   });
@@ -1037,25 +934,6 @@ export async function rebuildTokenRoutesFromAvailability(
 }
 
 async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenRoutesOptions) {
-  const tokenRows = await db.select().from(schema.tokenModelAvailability)
-    .innerJoin(schema.accountTokens, eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id))
-    .innerJoin(schema.accounts, eq(schema.accountTokens.accountId, schema.accounts.id))
-    .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-    .where(
-      and(
-        eq(schema.tokenModelAvailability.available, true),
-        eq(schema.accountTokens.enabled, true),
-        eq(schema.accountTokens.valueStatus, ACCOUNT_TOKEN_VALUE_STATUS_READY),
-        eq(schema.accounts.status, 'active'),
-        eq(schema.sites.status, 'active'),
-      ),
-    )
-    .all();
-  const usableTokenRows = tokenRows.filter((row) => (
-    isUsableAccountToken(row.account_tokens)
-    && requiresManagedAccountTokens(row.accounts)
-  ));
-
   const accountRows = await db.select().from(schema.modelAvailability)
     .innerJoin(schema.accounts, eq(schema.modelAvailability.accountId, schema.accounts.id))
     .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
@@ -1114,27 +992,24 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
 
   const modelCandidates = new Map<string, Map<string, {
     accountId: number;
-    tokenId: number | null;
     oauthRouteUnitId: number | null;
   }>>();
   const buildCandidateKey = (input: {
     accountId: number;
-    tokenId: number | null;
     oauthRouteUnitId: number | null;
   }) => (
     input.oauthRouteUnitId
       ? `route-unit:${input.oauthRouteUnitId}`
-      : `${input.accountId}:${input.tokenId ?? 'account'}`
+      : `account:${input.accountId}`
   );
   const buildChannelKey = (channel: typeof schema.routeChannels.$inferSelect) => (
     channel.oauthRouteUnitId
       ? `route-unit:${channel.oauthRouteUnitId}`
-      : `${channel.accountId}:${channel.tokenId ?? 'account'}`
+      : `account:${channel.accountId}`
   );
   const addModelCandidate = (
     modelNameRaw: string | null | undefined,
     accountId: number,
-    tokenId: number | null,
     siteId: number,
     oauthRouteUnitId: number | null = null,
   ) => {
@@ -1144,13 +1019,9 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
     if (isModelDisabledForSite(siteId, modelName)) return;
     if (blockedBrandRules.length > 0 && isModelBlockedByBrand(modelName, blockedBrandRules)) return;
     if (!modelCandidates.has(modelName)) modelCandidates.set(modelName, new Map());
-    const candidate = { accountId, tokenId, oauthRouteUnitId };
+    const candidate = { accountId, oauthRouteUnitId };
     modelCandidates.get(modelName)!.set(buildCandidateKey(candidate), candidate);
   };
-
-  for (const row of usableTokenRows) {
-    addModelCandidate(row.token_model_availability.modelName, row.accounts.id, row.account_tokens.id, row.accounts.siteId);
-  }
 
   for (const row of accountRows) {
     if (!supportsDirectAccountRoutingConnection(row.accounts)) continue;
@@ -1159,13 +1030,12 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
       addModelCandidate(
         row.model_availability.modelName,
         routeUnit.representativeAccountId,
-        null,
         row.accounts.siteId,
         routeUnit.routeUnitId,
       );
       continue;
     }
-    addModelCandidate(row.model_availability.modelName, row.accounts.id, null, row.accounts.siteId);
+    addModelCandidate(row.model_availability.modelName, row.accounts.id, row.accounts.siteId);
   }
 
   const routes = await db.select().from(schema.tokenRoutes).all();
@@ -1209,7 +1079,7 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
       const inserted = await db.insert(schema.routeChannels).values({
         routeId: route.id,
         accountId: candidate.accountId,
-        tokenId: candidate.tokenId,
+        tokenId: null,
         oauthRouteUnitId: candidate.oauthRouteUnitId,
         priority: 0,
         weight: 10,
@@ -1230,18 +1100,6 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
       const channelKey = buildChannelKey(channel);
       if (desiredKeys.has(channelKey)) {
         continue;
-      }
-
-      if (!channel.tokenId) {
-        const preferred = await getPreferredAccountToken(channel.accountId);
-        if (preferred && desiredKeys.has(`${channel.accountId}:${preferred.id}`)) {
-          await db.update(schema.routeChannels)
-            .set({ tokenId: preferred.id })
-            .where(eq(schema.routeChannels.id, channel.id))
-            .run();
-          affectedExactRouteIds.add(route.id);
-          continue;
-        }
       }
 
       if (!channel.manualOverride) {
@@ -1285,12 +1143,6 @@ async function rebuildTokenRoutesFromAvailabilityInternal(options: RebuildTokenR
     ? await syncPatternRouteChannelsAfterAffectedRouteChanges({
       affectedRouteIds: [...affectedExactRouteIds],
       removedRoutes: removedExactRouteSnapshots,
-      allowedModelNames: [...modelCandidates.keys()],
-      allowedAvailabilityCandidateKeys: Array.from(modelCandidates.entries()).flatMap(([modelName, candidates]) => (
-        Array.from(candidates.values())
-          .filter((candidate) => candidate.tokenId != null)
-          .map((candidate) => `${candidate.accountId}:${candidate.tokenId}:${normalizeModelAlias(modelName)}`)
-      )),
       rebuildAllPatternRoutes: options.rebuildPatternRoutes === true,
     })
     : {

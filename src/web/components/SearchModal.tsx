@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { formatDateTimeMinuteLocal } from '../pages/helpers/dateTime.js';
-import { buildAccountFocusPath, buildSiteFocusPath, buildTokenFocusPath } from '../pages/helpers/navigationFocus.js';
+import { buildAccountFocusPath, buildSiteFocusPath } from '../pages/helpers/navigationFocus.js';
 import { useI18n } from '../i18n.js';
 import { useAnimatedVisibility } from './useAnimatedVisibility.js';
 
@@ -21,18 +21,6 @@ interface AccountResult {
   site?: { name: string } | null;
 }
 
-interface AccountTokenResult {
-  id: number;
-  accountId: number;
-  name: string;
-  tokenGroup?: string | null;
-  account?: {
-    username?: string | null;
-    segment?: 'session' | 'apikey';
-  } | null;
-  site?: { name: string } | null;
-}
-
 interface ProxyLogResult {
   id: number;
   modelRequested?: string | null;
@@ -44,13 +32,11 @@ interface ProxyLogResult {
 interface ModelSearchResult {
   name: string;
   accountCount: number;
-  tokenCount: number;
   siteCount: number;
 }
 
 interface SearchResult {
   accounts: AccountResult[];
-  accountTokens: AccountTokenResult[];
   sites: SiteResult[];
   proxyLogs: ProxyLogResult[];
   models: ModelSearchResult[];
@@ -86,7 +72,6 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
       setResults({
         models: Array.isArray(res?.models) ? res.models : [],
         accounts: Array.isArray(res?.accounts) ? res.accounts : [],
-        accountTokens: Array.isArray(res?.accountTokens) ? res.accountTokens : [],
         sites: Array.isArray(res?.sites) ? res.sites : [],
         proxyLogs: Array.isArray(res?.proxyLogs) ? res.proxyLogs : [],
       });
@@ -121,7 +106,6 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
   const hasResults = results && (
     results.models.length
     || results.accounts.length
-    || results.accountTokens.length
     || results.sites.length
     || results.proxyLogs.length
   );
@@ -162,7 +146,7 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                   <div>
                     <div style={{ fontWeight: 500 }}>{m.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                      {m.accountCount} {t('个账号')} · {m.tokenCount} {t('个令牌')} · {m.siteCount} {t('个站点')}
+                      {m.accountCount} {t('个账号')} · {m.siteCount} {t('个站点')}
                     </div>
                   </div>
                 </button>
@@ -211,32 +195,6 @@ export default function SearchModal({ open, onClose }: { open: boolean; onClose:
                       {a.segment === 'apikey' ? ` · ${t('API Key 连接')}` : ''}
                       {' · '}
                       {t('余额')} ${(a.balance || 0).toFixed(2)}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {results?.accountTokens.length ? (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', padding: '8px 16px 4px', textTransform: 'uppercase' }}>{t('账号令牌')}</div>
-              {results.accountTokens.map((token) => (
-                <button
-                  key={token.id}
-                  className="search-result-item"
-                  onClick={() => goTo(buildTokenFocusPath(token.id))}
-                >
-                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                  </svg>
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{token.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                      {(token.account?.username?.trim() || (token.account?.segment === 'apikey' ? t('API Key 连接') : t('未命名')))}
-                      {' · '}
-                      {token.site?.name || t('未关联站点')}
-                      {token.tokenGroup ? ` · ${token.tokenGroup}` : ''}
                     </div>
                   </div>
                 </button>

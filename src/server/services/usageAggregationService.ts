@@ -14,11 +14,16 @@ import {
 } from './localTimeService.js';
 import { clearSnapshotCache } from './snapshotCacheService.js';
 
+// Keep the existing key: changing it without a raw-backed, range-safe rebuild
+// would either double-count old rows or erase aggregates that raw logs no longer cover.
 const USAGE_PROJECTOR_KEY = 'usage-aggregates-v1';
 const PROJECTION_BATCH_SIZE = 1_000;
 const PROJECTION_MAX_BATCHES_PER_PASS = 120;
 const PROJECTION_INTERVAL_MS = 5_000;
 const PROJECTION_LEASE_MS = 10 * 60_000;
+
+export const USAGE_AGGREGATE_COST_SEMANTICS_NOTE =
+  'new projections preserve explicit zero estimatedCost; historical aggregates may contain legacy token-based estimates and are not automatically rewritten';
 
 type ProjectionCheckpointRow = typeof schema.analyticsProjectionCheckpoints.$inferSelect;
 type ProjectionLease = {
@@ -152,10 +157,13 @@ function normalizeNonNegativeInt(value: unknown): number {
   return Math.round(numeric);
 }
 
-function normalizeNonNegativeFloat(value: unknown): number {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric;
+function resolveExplicitCost(value: unknown): number | null {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    return numeric;
+  }
+  return null;
 }
 
 function resolveSummarySpend(params: {
@@ -163,8 +171,8 @@ function resolveSummarySpend(params: {
   totalTokens: number | null;
   platform: string | null;
 }) {
-  const explicit = normalizeNonNegativeFloat(params.estimatedCost);
-  if (explicit > 0) return explicit;
+  const explicit = resolveExplicitCost(params.estimatedCost);
+  if (explicit !== null) return explicit;
   const tokens = normalizeNonNegativeInt(params.totalTokens);
   if (tokens <= 0) return 0;
   return tokens / 500_000;
@@ -175,8 +183,8 @@ function resolveSiteSpend(params: {
   totalTokens: number | null;
   platform: string | null;
 }) {
-  const explicit = normalizeNonNegativeFloat(params.estimatedCost);
-  if (explicit > 0) return explicit;
+  const explicit = resolveExplicitCost(params.estimatedCost);
+  if (explicit !== null) return explicit;
   const tokens = normalizeNonNegativeInt(params.totalTokens);
   if (tokens <= 0) return 0;
   return fallbackTokenCost(tokens);
@@ -186,8 +194,8 @@ function resolveModelSpend(params: {
   estimatedCost: number | null;
   totalTokens: number | null;
 }) {
-  const explicit = normalizeNonNegativeFloat(params.estimatedCost);
-  if (explicit > 0) return explicit;
+  const explicit = resolveExplicitCost(params.estimatedCost);
+  if (explicit !== null) return explicit;
   const tokens = normalizeNonNegativeInt(params.totalTokens);
   if (tokens <= 0) return 0;
   return tokens / 500_000;
@@ -850,7 +858,10 @@ export async function runUsageAggregationProjectionPass(
   projectionInFlight = runUsageAggregationProjectionPassImpl(options).then((result) => {
     if (result.processedLogs > 0 || result.recomputed) {
       logOperationalEvent('info', 'usage.projection_completed', {
-        processedLogs: result.processedLogs, watermarkId: result.watermarkId, recomputed: result.recomputed,
+        processedLogs: result.processedLogs,
+        watermarkId: result.watermarkId,
+        recomputed: result.recomputed,
+        costSemantics: USAGE_AGGREGATE_COST_SEMANTICS_NOTE,
       });
     }
     return result;
@@ -861,6 +872,58 @@ export async function runUsageAggregationProjectionPass(
     projectionInFlight = null;
   });
   return projectionInFlight;
+}
+
+export async function ensureUsageAggregationProjectedThroughLogId(
+  targetLogId: number,
+  options: { maxPasses?: number } = {},
+): Promise<ProjectionPassResult> {
+  const normalizedTargetId = Math.max(0, Math.trunc(Number(targetLogId) || 0));
+  if (normalizedTargetId <= 0) {
+    const checkpoint = await readProjectionCheckpoint();
+    return { processedLogs: 0, watermarkId: checkpoint.lastProxyLogId, recomputed: false };
+  }
+
+  let lastResult: ProjectionPassResult = {
+    processedLogs: 0,
+    watermarkId: 0,
+    recomputed: false,
+  };
+  const maxPasses = Math.max(1, Math.trunc(options.maxPasses || 8));
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const checkpointBefore = await readProjectionCheckpoint();
+    if (
+      checkpointBefore.lastProxyLogId >= normalizedTargetId
+      && checkpointBefore.recomputeFromId == null
+    ) {
+      return lastResult.watermarkId > 0
+        ? lastResult
+        : { processedLogs: 0, watermarkId: checkpointBefore.lastProxyLogId, recomputed: false };
+    }
+
+    lastResult = await runUsageAggregationProjectionPass();
+    const checkpointAfter = await readProjectionCheckpoint();
+    if (
+      checkpointAfter.lastProxyLogId >= normalizedTargetId
+      && checkpointAfter.recomputeFromId == null
+    ) {
+      return lastResult;
+    }
+
+    if (
+      lastResult.watermarkId <= checkpointBefore.lastProxyLogId
+      && !lastResult.recomputed
+    ) {
+      throw new Error(
+        `Usage aggregation watermark did not advance to log ${normalizedTargetId}`,
+      );
+    }
+  }
+
+  throw new Error(
+    `Usage aggregation watermark is behind log ${normalizedTargetId}`,
+  );
 }
 
 export async function requestUsageAggregatesRecompute(fromLogId = 1): Promise<void> {

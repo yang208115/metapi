@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db, schema } from "../db/index.js";
 import { getLocalRangeStartDayKey } from "./localTimeService.js";
 import {
@@ -29,13 +29,42 @@ export type SiteStatsSnapshotPayload = {
   sites: Array<typeof schema.sites.$inferSelect>;
 };
 
+export type SiteStatsSnapshotOptions = {
+  days?: number;
+  siteId?: number | null;
+  platform?: string | null;
+};
+
 const SITE_STATS_TTL_MS = 15_000;
 
+export function buildSiteTrendIdentity(siteId: number, siteName: string | null | undefined): string {
+  return `${String(siteName || "unknown")}::${siteId}`;
+}
+
+function normalizeSiteStatsOptions(options: SiteStatsSnapshotOptions = {}) {
+  const siteId = Number.isFinite(options.siteId) && Number(options.siteId) > 0
+    ? Math.trunc(Number(options.siteId))
+    : null;
+  const platform = String(options.platform || "").trim() || null;
+  return {
+    days: Math.max(1, Math.trunc(Number(options.days || 7))),
+    siteId,
+    platform,
+  };
+}
+
 async function loadSiteStatsSnapshotPayload(
-  days: number,
+  options: SiteStatsSnapshotOptions,
 ): Promise<SiteStatsSnapshotPayload> {
-  const sinceDay = getLocalRangeStartDayKey(days);
+  const normalized = normalizeSiteStatsOptions(options);
+  const sinceDay = getLocalRangeStartDayKey(normalized.days);
   await runUsageAggregationProjectionPass();
+
+  const siteFilters = [
+    ...(normalized.siteId == null ? [] : [eq(schema.sites.id, normalized.siteId)]),
+    ...(normalized.platform == null ? [] : [eq(schema.sites.platform, normalized.platform)]),
+  ];
+  const siteWhere = siteFilters.length > 0 ? and(...siteFilters) : undefined;
 
   const [spendRows, trendRows, sites, accountDistributionRows] =
     await Promise.all([
@@ -45,6 +74,8 @@ async function loadSiteStatsSnapshotPayload(
         totalSpend: sql<number>`coalesce(sum(${schema.siteDayUsage.totalSiteSpend}), 0)`,
       })
       .from(schema.siteDayUsage)
+      .innerJoin(schema.sites, eq(schema.siteDayUsage.siteId, schema.sites.id))
+      .where(siteWhere ? and(gte(schema.siteDayUsage.localDay, sinceDay), siteWhere) : gte(schema.siteDayUsage.localDay, sinceDay))
       .groupBy(schema.siteDayUsage.siteId)
       .all(),
     db
@@ -55,7 +86,7 @@ async function loadSiteStatsSnapshotPayload(
     db
       .select()
       .from(schema.sites)
-      .where(eq(schema.sites.status, "active"))
+      .where(siteWhere)
       .all(),
     db
       .select({
@@ -67,7 +98,7 @@ async function loadSiteStatsSnapshotPayload(
       })
       .from(schema.accounts)
       .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-      .where(eq(schema.sites.status, "active"))
+      .where(siteWhere)
       .groupBy(schema.sites.id, schema.sites.name, schema.sites.platform)
       .all(),
   ]);
@@ -98,14 +129,15 @@ async function loadSiteStatsSnapshotPayload(
     const site = activeSiteById.get(row.siteId);
     if (!site) continue;
     const siteName = site.name || "unknown";
+    const siteIdentity = buildSiteTrendIdentity(site.id, siteName);
     const date = row.localDay;
 
     if (!dayMap[date]) dayMap[date] = {};
-    if (!dayMap[date][siteName])
-      dayMap[date][siteName] = { spend: 0, calls: 0 };
+    if (!dayMap[date][siteIdentity])
+      dayMap[date][siteIdentity] = { spend: 0, calls: 0 };
 
-    dayMap[date][siteName].spend += Number(row.totalSiteSpend || 0);
-    dayMap[date][siteName].calls += Number(row.totalCalls || 0);
+    dayMap[date][siteIdentity].spend += Number(row.totalSiteSpend || 0);
+    dayMap[date][siteIdentity].calls += Number(row.totalCalls || 0);
   }
 
   const trend = Object.entries(dayMap)
@@ -133,17 +165,20 @@ async function loadSiteStatsSnapshotPayload(
 export async function getSiteStatsSnapshot(options?: {
   days?: number;
   forceRefresh?: boolean;
+  siteId?: number | null;
+  platform?: string | null;
 }): Promise<SnapshotEnvelope<SiteStatsSnapshotPayload>> {
-  const days = Math.max(1, Math.trunc(options?.days || 7));
+  const normalized = normalizeSiteStatsOptions(options);
+  const key = JSON.stringify(normalized);
   return readSnapshotCache({
     namespace: "site-stats",
-    key: JSON.stringify({ days }),
+    key,
     ttlMs: SITE_STATS_TTL_MS,
     forceRefresh: options?.forceRefresh,
     persistence: createAdminSnapshotPersistence<SiteStatsSnapshotPayload>({
       namespace: "site-stats",
-      key: JSON.stringify({ days }),
+      key,
     }),
-    loader: async () => loadSiteStatsSnapshotPayload(days),
+    loader: async () => loadSiteStatsSnapshotPayload(normalized),
   });
 }

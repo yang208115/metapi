@@ -56,8 +56,8 @@ docker compose up -d
 
 1. 未添加任何站点或账号
 2. 账号处于 `unhealthy` 状态 — 在账号管理页面检查并刷新
-3. 未同步 Token — 在 Token 管理页面点击「同步」
-4. 模型未发现 — 手动触发模型刷新；若近期改过站点/账号/路由，可到「设置 → 清除缓存并重建路由」或「TokenRoutes → 重建路由」后再试
+3. 账号凭证无权访问模型 — 在连接管理中检查 API Key、Session 或 OAuth 状态
+4. 模型未发现 — 手动触发模型刷新；若近期改过站点、连接或路由，可到「设置 → 清除缓存并重建路由」或「路由管理 → 重建路由」后再试
 
 ### Q: 非流式正常，但流式输出异常（卡住、乱码、截断）
 
@@ -134,7 +134,7 @@ docker compose up -d
 
 如果以上内容未能解决你的问题：
 
-- [搜索已有 Issue](https://github.com/cita-777/metapi/issues?q=is%3Aissue) — 看看是否有人遇到过相同问题
-- [提交新 Issue](https://github.com/cita-777/metapi/issues/new) — 报告 Bug 或提出功能建议
-- [参与讨论](https://github.com/cita-777/metapi/discussions) — 使用疑问、经验分享
+- [搜索已有 Issue](https://github.com/yang208115/metapi/issues?q=is%3Aissue) — 看看是否有人遇到过相同问题
+- [提交新 Issue](https://github.com/yang208115/metapi/issues/new) — 报告 Bug 或提出功能建议
+- [参与讨论](https://github.com/yang208115/metapi/discussions) — 使用疑问、经验分享
 - [文档中心](./README.md) — 查看所有文档

@@ -237,7 +237,7 @@ export default function SiteDistributionChart({ data, loading }: SiteDistributio
               boxShadow: viewMode === 'balance' ? 'var(--shadow-sm)' : 'none',
             }}
           >
-            余额分布
+            余额快照
           </button>
           <button
             onClick={() => setViewMode('spend')}

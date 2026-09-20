@@ -1,21 +1,12 @@
 import { useState, useMemo } from 'react';
 import CenteredModal from '../../components/CenteredModal.js';
-import ModernSelect from '../../components/ModernSelect.js';
 import { api } from '../../api.js';
 import { useToast } from '../../components/Toast.js';
 import { tr } from '../../i18n.js';
-import type { RouteCandidateView, RouteAccountOption, RouteTokenOption } from '../helpers/routeModelCandidatesIndex.js';
-import type { RouteMissingTokenHint } from '../helpers/routeMissingTokenHints.js';
-import {
-  buildFixedTokenOptionDescription,
-  buildFixedTokenOptionLabel,
-  describeTokenBinding,
-} from './tokenBindingPresentation.js';
+import type { RouteCandidateView, RouteAccountOption } from '../helpers/routeModelCandidatesIndex.js';
 
 type ChannelSelection = {
   accountId: number;
-  tokenId?: number;
-  sourceModel?: string;
 };
 
 type AddChannelModalProps = {
@@ -25,8 +16,6 @@ type AddChannelModalProps = {
   routeTitle: string;
   candidateView: RouteCandidateView;
   onSuccess: () => void;
-  missingTokenHints?: RouteMissingTokenHint[];
-  onCreateTokenForMissing?: (accountId: number, modelName: string) => void;
   existingChannelAccountIds?: Set<number>;
 };
 
@@ -37,8 +26,6 @@ export default function AddChannelModal({
   routeTitle,
   candidateView,
   onSuccess,
-  missingTokenHints,
-  onCreateTokenForMissing,
   existingChannelAccountIds,
 }: AddChannelModalProps) {
   const toast = useToast();
@@ -54,26 +41,6 @@ export default function AddChannelModal({
     );
   }, [candidateView.accountOptions, searchQuery]);
 
-  const missingAccounts = useMemo(() => {
-    if (!missingTokenHints || missingTokenHints.length === 0) return [];
-    const seen = new Map<number, { accountId: number; label: string; modelName: string }>();
-    for (const hint of missingTokenHints) {
-      for (const account of hint.accounts) {
-        if (!seen.has(account.accountId)) {
-          const label = `${account.username || `account-${account.accountId}`} @ ${account.siteName}`;
-          seen.set(account.accountId, { accountId: account.accountId, label, modelName: hint.modelName });
-        }
-      }
-    }
-    return Array.from(seen.values());
-  }, [missingTokenHints]);
-
-  const filteredMissingAccounts = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return missingAccounts;
-    return missingAccounts.filter((item) => item.label.toLowerCase().includes(q));
-  }, [missingAccounts, searchQuery]);
-
   const selectedCount = Object.keys(selectedAccounts).length;
 
   const toggleAccount = (account: RouteAccountOption) => {
@@ -83,25 +50,10 @@ export default function AddChannelModal({
         delete next[account.id];
         return next;
       }
-      const tokens = candidateView.tokenOptionsByAccountId[account.id] || [];
       return {
         ...prev,
         [account.id]: {
           accountId: account.id,
-        },
-      };
-    });
-  };
-
-  const updateTokenForAccount = (accountId: number, tokenId: number, sourceModel: string) => {
-    setSelectedAccounts((prev) => {
-      if (!prev[accountId]) return prev;
-      return {
-        ...prev,
-        [accountId]: {
-          ...prev[accountId],
-          tokenId: tokenId || undefined,
-          sourceModel: sourceModel || undefined,
         },
       };
     });
@@ -180,20 +132,17 @@ export default function AddChannelModal({
         </div>
 
         <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {filteredAccounts.length === 0 && filteredMissingAccounts.length === 0 ? (
+          {filteredAccounts.length === 0 ? (
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)', padding: '12px 0', textAlign: 'center' }}>
-              {candidateView.accountOptions.length === 0 && missingAccounts.length === 0
-                ? tr('当前没有可用的账号，请确认已有账号的令牌支持调用此模型')
+              {candidateView.accountOptions.length === 0
+                ? tr('当前没有支持此模型的可用账号')
                 : tr('没有匹配的账号')}
             </div>
           ) : (
             <>
               {filteredAccounts.map((account) => {
                 const isSelected = !!selectedAccounts[account.id];
-                const tokens = candidateView.tokenOptionsByAccountId[account.id] || [];
-                const selection = selectedAccounts[account.id];
                 const isExisting = existingChannelAccountIds?.has(account.id);
-                const tokenBinding = describeTokenBinding(tokens, selection?.tokenId || 0);
 
                 return (
                   <div
@@ -220,79 +169,9 @@ export default function AddChannelModal({
                       )}
                     </div>
 
-                    {isSelected && tokens.length > 0 && (
-                      <div style={{ marginTop: 6, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
-                        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 4 }}>{tr('令牌绑定')}:</div>
-                        <ModernSelect
-                          size="sm"
-                          value={(() => {
-                            if (!selection?.tokenId) return '0';
-                            return `${selection.tokenId}::${selection.sourceModel || ''}`;
-                          })()}
-                          onChange={(nextValue) => {
-                            if (nextValue === '0') {
-                              updateTokenForAccount(account.id, 0, '');
-                              return;
-                            }
-                            const [tokenRaw, ...sourceParts] = nextValue.split('::');
-                            updateTokenForAccount(account.id, Number.parseInt(tokenRaw, 10) || 0, sourceParts.join('::'));
-                          }}
-                          options={[
-                            {
-                              value: '0',
-                              label: tr('跟随账号默认'),
-                              description: tokenBinding.followOptionDescription,
-                            },
-                            ...tokens.map((token: RouteTokenOption) => ({
-                              value: `${token.id}::${token.sourceModel || ''}`,
-                              label: buildFixedTokenOptionLabel(token, {
-                                includeDefaultTag: true,
-                                includeSourceModel: true,
-                              }),
-                              description: buildFixedTokenOptionDescription(token),
-                            })),
-                          ]}
-                          placeholder={tr('选择绑定方式')}
-                        />
-                        <div style={{ marginTop: 4, fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                          {tokenBinding.helperText}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
-
-              {/* Missing token hints */}
-              {filteredMissingAccounts.length > 0 && (
-                <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 8, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 2 }}>
-                    {tr('以下账号可用此模型但缺少令牌')}:
-                  </div>
-                  {filteredMissingAccounts.map((item) => (
-                    <div
-                      key={item.accountId}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '6px 10px', borderRadius: 'var(--radius-sm)',
-                        border: '1px dashed var(--color-border)', background: 'var(--color-bg)',
-                      }}
-                    >
-                      <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{item.label}</span>
-                      {onCreateTokenForMissing && (
-                        <button
-                          type="button"
-                          className="btn btn-link"
-                          style={{ fontSize: 11, padding: '2px 6px' }}
-                          onClick={() => onCreateTokenForMissing(item.accountId, item.modelName)}
-                        >
-                          {tr('创建令牌')}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
             </>
           )}
         </div>

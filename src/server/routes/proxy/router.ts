@@ -9,8 +9,11 @@ import { imagesProxyRoute } from './images.js';
 import { geminiProxyRoute } from './gemini.js';
 import { filesProxyRoute } from './files.js';
 import { rerankProxyRoute } from './rerank.js';
+import { installProxyRequestTelemetry } from '../../proxy-core/requestTelemetry.js';
 
 export async function proxyRoutes(app: FastifyInstance) {
+  installProxyRequestTelemetry(app);
+
   // Auth middleware for all /v1 routes
   app.addHook('onRequest', async (request, reply) => {
     await proxyAuthMiddleware(request, reply);

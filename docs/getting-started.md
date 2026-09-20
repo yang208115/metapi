@@ -13,47 +13,40 @@
 | 场景 | 推荐方式 | 需要准备 |
 |------|----------|----------|
 | 云服务器 / NAS / 家用主机长期运行 | Docker / Docker Compose | Docker 与 Docker Compose |
-| 二次开发 / 调试 | 本地开发 | Node.js 20+ 与 npm |
+| 二次开发 / 调试 | 本地开发 | Node.js 22+ 与 npm |
 
 > [!NOTE]
 > - 当前不再把 `Release` 压缩包 + Node.js 运行时作为独立部署路径。
 
 ## 方式一：Docker Compose 部署（推荐）
 
-### 1. 创建项目目录
+### 1. 获取重构版源码
 
 ```bash
-mkdir metapi && cd metapi
+git clone https://github.com/yang208115/metapi.git
+cd metapi
 ```
 
-### 2. 创建 `docker-compose.yml`
-
-```yaml
-services:
-  metapi:
-    image: 1467078763/metapi:latest
-    ports:
-      - "4000:4000"
-    volumes:
-      - ./data:/app/data
-    environment:
-      AUTH_TOKEN: ${AUTH_TOKEN:?AUTH_TOKEN is required}
-      PROXY_TOKEN: ${PROXY_TOKEN:?PROXY_TOKEN is required}
-      PORT: ${PORT:-4000}
-      DATA_DIR: /app/data
-      TZ: ${TZ:-Asia/Shanghai}
-    restart: unless-stopped
-```
-
-### 3. 设置令牌并启动
+### 2. 创建本地配置
 
 ```bash
-# AUTH_TOKEN = 管理后台初始管理员令牌（登录后台时输入这个值）
-export AUTH_TOKEN=your-admin-token
-# PROXY_TOKEN = 下游客户端调用 /v1/* 使用的令牌
-export PROXY_TOKEN=your-proxy-sk-token
-docker compose up -d
+cp .env.example .env
 ```
+
+编辑 `.env`，至少替换：
+
+- `AUTH_TOKEN`：管理后台登录令牌；
+- `PROXY_TOKEN`：默认下游代理令牌；
+- `ACCOUNT_CREDENTIAL_SECRET`：独立的账号凭证加密密钥，建议用 `openssl rand -hex 32` 生成。
+
+### 3. 构建并启动
+
+```bash
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
+```
+
+> [!IMPORTANT]
+> `1467078763/metapi` 是上游项目镜像，不包含本重构版改动。本仓库的 Compose 文件会从当前源码构建 `metapi-refactor:local`。
 
 ### 4. 访问管理后台
 
@@ -63,12 +56,14 @@ docker compose up -d
 > 初始管理员令牌就是启动时配置的 `AUTH_TOKEN`。  
 > 如果未显式设置（非 Compose 场景），默认值为 `change-me-admin-token`（仅建议本地调试）。  
 > 若你在后台「设置」里修改过管理员令牌，后续登录请使用新令牌。
-## 方式三：本地开发启动
+
+## 方式二：本地开发启动
 
 ```bash
-git clone https://github.com/cita-777/metapi.git
+git clone https://github.com/yang208115/metapi.git
 cd metapi
-npm install
+cp .env.example .env
+npm ci
 npm run db:migrate
 npm run dev
 ```

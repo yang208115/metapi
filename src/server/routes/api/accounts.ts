@@ -545,11 +545,6 @@ export async function accountsRoutes(app: FastifyInstance) {
 
       // Auto-fetch API token(s)
       let apiToken: string | null = null;
-      let apiTokens: Array<{
-        name?: string | null;
-        key?: string | null;
-        enabled?: boolean | null;
-      }> = [];
       try {
         apiToken = await adapter.getApiToken(
           site.url,
@@ -557,18 +552,6 @@ export async function accountsRoutes(app: FastifyInstance) {
           guessedPlatformUserId,
         );
       } catch {}
-      try {
-        apiTokens = await adapter.getApiTokens(
-          site.url,
-          loginResult.accessToken,
-          guessedPlatformUserId,
-        );
-      } catch {}
-
-      const preferredApiToken =
-        apiTokens.find((token) => token.enabled !== false && token.key)?.key ||
-        apiToken ||
-        null;
       const existing = await db
         .select()
         .from(schema.accounts)
@@ -603,7 +586,7 @@ export async function accountsRoutes(app: FastifyInstance) {
           .update(schema.accounts)
           .set({
             accessToken: loginResult.accessToken,
-            apiToken: preferredApiToken || undefined,
+            apiToken: apiToken || undefined,
             status: "active",
             extraConfig,
             updatedAt: new Date().toISOString(),
@@ -620,7 +603,7 @@ export async function accountsRoutes(app: FastifyInstance) {
             siteId,
             username,
             accessToken: loginResult.accessToken,
-            apiToken: preferredApiToken || undefined,
+            apiToken: apiToken || undefined,
             extraConfig,
             isPinned: false,
             sortOrder: await getNextAccountSortOrder(),
@@ -642,9 +625,6 @@ export async function accountsRoutes(app: FastifyInstance) {
 
       await convergeAccountMutation({
         accountId: result.id,
-        preferredApiToken,
-        defaultTokenSource: "sync",
-        upstreamTokens: apiTokens,
         refreshBalance: true,
         refreshModels: true,
         rebuildRoutes: true,
@@ -659,8 +639,7 @@ export async function accountsRoutes(app: FastifyInstance) {
       return {
         success: true,
         account,
-        apiTokenFound: !!preferredApiToken,
-        tokenCount: apiTokens.length,
+        apiTokenFound: !!apiToken,
         reusedAccount: !!existing,
       };
     },
@@ -1240,8 +1219,6 @@ export async function accountsRoutes(app: FastifyInstance) {
 
       await convergeAccountMutation({
         accountId,
-        preferredApiToken: nextApiToken,
-        defaultTokenSource: "sync",
         refreshBalance: true,
         refreshModels: true,
         rebuildRoutes: true,
@@ -1559,8 +1536,6 @@ export async function accountsRoutes(app: FastifyInstance) {
       const { account: updatedAccount } = await applyAccountUpdateWorkflow({
         accountId: id,
         updates,
-        preferredApiToken:
-          nextCredentialMode !== "apikey" ? nextApiToken : null,
         refreshModels: needsModelRefresh,
         preserveExpiredStatus: isExpiredApiKeyAccount,
         allowInactiveModelRefresh: shouldAttemptExpiredApiKeyRecovery,

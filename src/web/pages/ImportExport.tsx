@@ -17,7 +17,7 @@ type ParsedSummary = {
   accountsCount: number;
   bookmarksCount: number;
   profilesCount: number;
-  tokensCount: number;
+  legacyCredentialRecordsCount: number;
   routesCount: number;
   channelsCount: number;
   siteDisabledModelsCount: number;
@@ -75,7 +75,7 @@ function parseImportSummary(raw: string): ParsedSummary | null {
     accountsCount: 0,
     bookmarksCount: 0,
     profilesCount: 0,
-    tokensCount: 0,
+    legacyCredentialRecordsCount: 0,
     routesCount: 0,
     channelsCount: 0,
     siteDisabledModelsCount: 0,
@@ -167,7 +167,7 @@ function parseImportSummary(raw: string): ParsedSummary | null {
       accountsCount: toCount(accountsSection?.accounts),
       bookmarksCount,
       profilesCount,
-      tokensCount: toCount(accountsSection?.accountTokens),
+      legacyCredentialRecordsCount: toCount(accountsSection?.accountTokens),
       routesCount: toCount(accountsSection?.tokenRoutes),
       channelsCount: toCount(accountsSection?.routeChannels),
       siteDisabledModelsCount: toCount(accountsSection?.siteDisabledModels),
@@ -489,7 +489,7 @@ export default function ImportExport() {
                     ) : null}
                     {(summary.sitesCount
                       || summary.accountsCount
-                      || summary.tokensCount
+                      || summary.legacyCredentialRecordsCount
                       || summary.routesCount
                       || summary.channelsCount
                       || summary.siteDisabledModelsCount
@@ -497,7 +497,7 @@ export default function ImportExport() {
                       || summary.downstreamApiKeysCount
                       || summary.settingsCount) ? (
                       <div>
-                        统计：站点 {summary.sitesCount} / 账号 {summary.accountsCount} / 令牌 {summary.tokensCount} / 路由 {summary.routesCount} / 通道 {summary.channelsCount} / 站点禁用模型 {summary.siteDisabledModelsCount} / 手工模型 {summary.manualModelsCount} / 下游 Key {summary.downstreamApiKeysCount} / 设置 {summary.settingsCount}
+                        统计：站点 {summary.sitesCount} / 账号 {summary.accountsCount} / 兼容凭证记录 {summary.legacyCredentialRecordsCount} / 路由 {summary.routesCount} / 通道 {summary.channelsCount} / 站点禁用模型 {summary.siteDisabledModelsCount} / 手工模型 {summary.manualModelsCount} / 下游 Key {summary.downstreamApiKeysCount} / 设置 {summary.settingsCount}
                       </div>
                     ) : null}
                     {summary.hasLegacyData ? <div>检测到兼容结构：将按兼容模式导入。</div> : null}

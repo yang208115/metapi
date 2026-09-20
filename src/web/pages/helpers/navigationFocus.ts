@@ -2,7 +2,6 @@ import { isTruthyFlag } from './accountConnection.js';
 
 const FOCUS_SITE_ID_KEY = 'focusSiteId';
 const FOCUS_ACCOUNT_ID_KEY = 'focusAccountId';
-const FOCUS_TOKEN_ID_KEY = 'focusTokenId';
 const OPEN_REBIND_KEY = 'openRebind';
 
 function normalizePositiveId(input: unknown): number | null {
@@ -19,7 +18,7 @@ export function buildSiteFocusPath(siteId: number): string {
 
 export function buildAccountFocusPath(
   accountId: number,
-  options?: { openRebind?: boolean; segment?: 'session' | 'apikey' | 'tokens' },
+  options?: { openRebind?: boolean; segment?: 'session' | 'apikey' },
 ): string {
   const normalizedId = normalizePositiveId(accountId);
   if (!normalizedId) return '/accounts';
@@ -27,15 +26,6 @@ export function buildAccountFocusPath(
   if (options?.segment && options.segment !== 'session') params.set('segment', options.segment);
   params.set(FOCUS_ACCOUNT_ID_KEY, String(normalizedId));
   if (options?.openRebind) params.set(OPEN_REBIND_KEY, '1');
-  return `/accounts?${params.toString()}`;
-}
-
-export function buildTokenFocusPath(tokenId: number): string {
-  const normalizedId = normalizePositiveId(tokenId);
-  if (!normalizedId) return '/accounts?segment=tokens';
-  const params = new URLSearchParams();
-  params.set('segment', 'tokens');
-  params.set(FOCUS_TOKEN_ID_KEY, String(normalizedId));
   return `/accounts?${params.toString()}`;
 }
 
@@ -52,19 +42,37 @@ export function readFocusAccountIntent(search: string): { accountId: number | nu
   };
 }
 
-export function readFocusTokenId(search: string): number | null {
-  const params = new URLSearchParams(search);
-  return normalizePositiveId(params.get(FOCUS_TOKEN_ID_KEY));
-}
-
 export function clearFocusParams(search: string): string {
   const params = new URLSearchParams(search);
   params.delete(FOCUS_SITE_ID_KEY);
   params.delete(FOCUS_ACCOUNT_ID_KEY);
-  params.delete(FOCUS_TOKEN_ID_KEY);
   params.delete(OPEN_REBIND_KEY);
+  params.delete('backPath');
   const next = params.toString();
   return next ? `?${next}` : '';
+}
+
+const BACK_PATH_KEY = 'backPath';
+
+export function appendBackPath(path: string, currentBackPath: string): string {
+  if (!currentBackPath) return path;
+  const [base, search] = path.split('?');
+  const params = new URLSearchParams(search || '');
+  params.set(BACK_PATH_KEY, encodeURIComponent(currentBackPath));
+  return `${base}?${params.toString()}`;
+}
+
+export function readBackPath(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const raw = params.get(BACK_PATH_KEY);
+  if (!raw) return null;
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded.startsWith('/') && !decoded.startsWith('//')) {
+      return decoded;
+    }
+  } catch {}
+  return null;
 }
 
 export function buildEventNavigationPath(event: {

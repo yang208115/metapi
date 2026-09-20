@@ -60,24 +60,6 @@ export interface TokenVerifyResult {
   models?: string[];
 }
 
-export interface ApiTokenInfo {
-  name: string;
-  key: string;
-  enabled?: boolean;
-  tokenGroup?: string | null;
-}
-
-export interface CreateApiTokenOptions {
-  name?: string;
-  group?: string;
-  unlimitedQuota?: boolean;
-  remainQuota?: number;
-  expiredTime?: number;
-  allowIps?: string;
-  modelLimitsEnabled?: boolean;
-  modelLimits?: string;
-}
-
 export interface PlatformAdapter {
   readonly platformName: string;
   detect(url: string): Promise<boolean>;
@@ -87,10 +69,6 @@ export interface PlatformAdapter {
   getBalance(baseUrl: string, accessToken: string, platformUserId?: number): Promise<BalanceInfo>;
   getModels(baseUrl: string, token: string, platformUserId?: number, contextSourceScope?: string): Promise<string[]>;
   getApiToken(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string | null>;
-  getApiTokens(baseUrl: string, accessToken: string, platformUserId?: number): Promise<ApiTokenInfo[]>;
-  getUserGroups(baseUrl: string, accessToken: string, platformUserId?: number): Promise<string[]>;
-  createApiToken(baseUrl: string, accessToken: string, platformUserId?: number, options?: CreateApiTokenOptions): Promise<boolean>;
-  deleteApiToken(baseUrl: string, accessToken: string, tokenKey: string, platformUserId?: number): Promise<boolean>;
 }
 
 export abstract class BasePlatformAdapter implements PlatformAdapter {
@@ -199,38 +177,6 @@ export abstract class BasePlatformAdapter implements PlatformAdapter {
 
   async getApiToken(_baseUrl: string, _accessToken: string, _platformUserId?: number): Promise<string | null> {
     return null;
-  }
-
-  async getApiTokens(baseUrl: string, accessToken: string, platformUserId?: number): Promise<ApiTokenInfo[]> {
-    const token = await this.getApiToken(baseUrl, accessToken, platformUserId);
-    if (!token) return [];
-    return [{ name: 'default', key: token, enabled: true, tokenGroup: 'default' }];
-  }
-
-  async createApiToken(
-    _baseUrl: string,
-    _accessToken: string,
-    _platformUserId?: number,
-    _options?: CreateApiTokenOptions,
-  ): Promise<boolean> {
-    return false;
-  }
-
-  async getUserGroups(
-    _baseUrl: string,
-    _accessToken: string,
-    _platformUserId?: number,
-  ): Promise<string[]> {
-    return ['default'];
-  }
-
-  async deleteApiToken(
-    _baseUrl: string,
-    _accessToken: string,
-    _tokenKey: string,
-    _platformUserId?: number,
-  ): Promise<boolean> {
-    return false;
   }
 
   protected async fetchJson<T>(url: string, options?: UndiciRequestInit): Promise<T> {

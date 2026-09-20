@@ -277,6 +277,34 @@ export const proxyLogs = sqliteTable('proxy_logs', {
   clientFamilyCreatedIdx: index('proxy_logs_client_family_created_at_idx').on(table.clientFamily, table.createdAt),
 }));
 
+export const proxyRequestOutcomes = sqliteTable('proxy_request_outcomes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  requestId: text('request_id').notNull(),
+  startedAt: text('started_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+  downstreamPath: text('downstream_path').notNull(),
+  modelRequested: text('model_requested'),
+  siteId: integer('site_id'),
+  accountId: integer('account_id'),
+  channelId: integer('channel_id'),
+  status: text('status').notNull(),
+  httpStatus: integer('http_status'),
+  latencyMs: integer('latency_ms').notNull(),
+  firstByteLatencyMs: integer('first_byte_latency_ms'),
+  attemptCount: integer('attempt_count').notNull(),
+  failedAttemptCount: integer('failed_attempt_count').notNull(),
+  totalTokens: integer('total_tokens'),
+  estimatedCost: real('estimated_cost'),
+  errorClass: text('error_class'),
+  isStream: integer('is_stream', { mode: 'boolean' }).notNull(),
+}, (table) => ({
+  requestIdIdx: index('proxy_request_outcomes_request_id_idx').on(table.requestId),
+  startedAtIdx: index('proxy_request_outcomes_started_at_idx').on(table.startedAt),
+  completedAtIdx: index('proxy_request_outcomes_completed_at_idx').on(table.completedAt),
+  statusCompletedIdx: index('proxy_request_outcomes_status_completed_idx').on(table.status, table.completedAt),
+  siteCompletedIdx: index('proxy_request_outcomes_site_completed_idx').on(table.siteId, table.completedAt),
+}));
+
 export const proxyDebugTraces = sqliteTable('proxy_debug_traces', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   downstreamPath: text('downstream_path').notNull(),

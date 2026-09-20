@@ -407,7 +407,7 @@ function padDateTimeSegment(value: number) {
 }
 
 function formatDateTimeInputValue(value: Date) {
-  return `${value.getFullYear()}-${padDateTimeSegment(value.getMonth() + 1)}-${padDateTimeSegment(value.getDate())}T${padDateTimeSegment(value.getHours())}:${padDateTimeSegment(value.getMinutes())}`;
+  return `${value.getFullYear()}-${padDateTimeSegment(value.getMonth() + 1)}-${padDateTimeSegment(value.getDate())}T${padDateTimeSegment(value.getHours())}:${padDateTimeSegment(value.getMinutes())}:${padDateTimeSegment(value.getSeconds())}.${String(value.getMilliseconds()).padStart(3, "0")}`;
 }
 
 function normalizeRoutePage(raw: string | null): number {
@@ -1632,8 +1632,8 @@ export default function ProxyLogs() {
         >
           <div style={{ padding: 12, display: "grid", gap: 8 }}>
             {selectedDebugTraceDetail.data.attempts.length === 0 ? (
-              <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
-                暂无 attempt 记录
+              <div style={{ color: "var(--color-text-muted)", fontSize: 13, lineHeight: 1.5 }}>
+                {tr("此请求未记录完整链路（未开启或未捕获逐次尝试追踪，仅显示最终结果）")}
               </div>
             ) : (
               selectedDebugTraceDetail.data.attempts.map(renderAttemptDetail)
@@ -1650,17 +1650,17 @@ export default function ProxyLogs() {
         {[
           {
             key: "all" as ProxyLogStatusFilter,
-            label: "全部",
+            label: tr("全部"),
             count: summary.totalCount,
           },
           {
             key: "success" as ProxyLogStatusFilter,
-            label: "成功",
+            label: tr("成功"),
             count: summary.successCount,
           },
           {
             key: "failed" as ProxyLogStatusFilter,
-            label: "失败",
+            label: tr("最终失败"),
             count: summary.failedCount,
           },
         ].map((tab) => (
@@ -1707,6 +1707,7 @@ export default function ProxyLogs() {
         <span>开始</span>
         <input
           type="datetime-local"
+          step="0.001"
           value={fromInput}
           max={toInput || undefined}
           onChange={(e) => {
@@ -1719,6 +1720,7 @@ export default function ProxyLogs() {
         <span>结束</span>
         <input
           type="datetime-local"
+          step="0.001"
           value={toInput}
           min={fromInput || undefined}
           onChange={(e) => {

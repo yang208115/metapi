@@ -3,6 +3,15 @@ import { randomUUID } from 'node:crypto';
 type LogFields = Record<string, string | number | boolean | null | undefined>;
 type LogLevel = 'info' | 'warn' | 'error';
 
+export function operationalUrlHost(url: string): string | undefined {
+  try {
+    return new URL(url.includes('://') ? url : `https://${url}`).host || undefined;
+  } catch {
+    // Never fall back to raw input, which may contain credentials or signed paths.
+    return undefined;
+  }
+}
+
 // Only pass selected metadata here, never request bodies, credentials or upstream text.
 export function logOperationalEvent(level: LogLevel, event: string, fields: LogFields = {}): void {
   console[level](`[${event}] ${JSON.stringify(fields)}`);

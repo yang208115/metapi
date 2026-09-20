@@ -828,7 +828,7 @@ export default function ModelTester() {
           .filter((candidate) => candidate?.eligible === true && typeof candidate?.channelId === 'number')
           .map((candidate) => ({
             value: String(candidate.channelId),
-            label: `${candidate.username || `account-${candidate.accountId || 'unknown'}`} @ ${candidate.siteName || 'unknown'} / ${candidate.tokenName || 'default'} (P${candidate.priority ?? 0})`,
+            label: `${candidate.username || `account-${candidate.accountId || 'unknown'}`} @ ${candidate.siteName || 'unknown'} (P${candidate.priority ?? 0})`,
             description: typeof candidate.reason === 'string' && candidate.reason.trim().length > 0
               ? candidate.reason
               : undefined,

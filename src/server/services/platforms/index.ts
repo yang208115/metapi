@@ -3,6 +3,7 @@ import { OpenAiAdapter } from './openai.js';
 import { ClaudeAdapter } from './claude.js';
 import { GeminiAdapter } from './gemini.js';
 import { detectPlatformByUrlHint, normalizePlatformAlias } from '../../../shared/platformIdentity.js';
+import { logOperationalEvent, operationalErrorFields, operationalUrlHost } from '../../shared/operationalLog.js';
 
 const adapters: PlatformAdapter[] = [
   new OpenAiAdapter(),
@@ -20,13 +21,31 @@ export function getAdapter(platform: string): PlatformAdapter | undefined {
 }
 
 export async function detectPlatform(url: string): Promise<PlatformAdapter | undefined> {
+  const host = operationalUrlHost(url);
   const urlHint = detectPlatformByUrlHint(url);
   if (urlHint) {
-    return getAdapter(urlHint);
+    const adapter = getAdapter(urlHint);
+    logOperationalEvent(adapter ? 'info' : 'warn', 'site.detect.url_hint', {
+      host, platform: urlHint, matched: !!adapter,
+    });
+    return adapter;
   }
 
   for (const adapter of adapters) {
-    if (await adapter.detect(url)) return adapter;
+    const startedAt = performance.now();
+    try {
+      const matched = await adapter.detect(url);
+      logOperationalEvent('info', 'site.detect.adapter_result', {
+        host, platform: adapter.platformName, matched, durationMs: Math.round(performance.now() - startedAt),
+      });
+      if (matched) return adapter;
+    } catch (error) {
+      logOperationalEvent('warn', 'site.detect.adapter_failed', {
+        host, platform: adapter.platformName, ...operationalErrorFields(error),
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      throw error;
+    }
   }
   return undefined;
 }

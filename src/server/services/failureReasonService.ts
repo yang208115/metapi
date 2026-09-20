@@ -83,7 +83,7 @@ export function classifyFailureReason(
       code: 'token_expired',
       category: 'auth',
       title: '令牌失效',
-      actionHint: '重新登录或同步新令牌',
+      actionHint: '重新登录或更新账号凭证',
       detailHint: '账号访问令牌可能过期或无效，需更新认证信息。',
     };
   }

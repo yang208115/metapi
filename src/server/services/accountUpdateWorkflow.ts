@@ -8,7 +8,6 @@ import {
 type AccountUpdateWorkflowInput = {
   accountId: number;
   updates: Partial<typeof schema.accounts.$inferInsert>;
-  preferredApiToken?: string | null;
   refreshModels: boolean;
   preserveExpiredStatus?: boolean;
   allowInactiveModelRefresh?: boolean;
@@ -35,8 +34,6 @@ export async function applyAccountUpdateWorkflow(input: AccountUpdateWorkflowInp
 
   const convergence = await convergeAccountMutation({
     accountId: input.accountId,
-    preferredApiToken: input.preferredApiToken,
-    defaultTokenSource: 'manual',
     refreshModels: input.refreshModels,
     allowInactiveModelRefresh: input.allowInactiveModelRefresh,
     rebuildRoutes: false,

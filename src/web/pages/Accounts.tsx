@@ -26,7 +26,6 @@ import {
   clearFocusParams,
   readFocusAccountIntent,
 } from "./helpers/navigationFocus.js";
-import { TokensPanel } from "./Tokens.js";
 import { tr } from "../i18n.js";
 import {
   buildCustomReorderUpdates,
@@ -38,7 +37,7 @@ import { SITE_DOCS_URL } from "../docsLink.js";
 import { getSiteInitializationPreset } from "../../shared/siteInitializationPresets.js";
 import { parseBatchApiKeys } from "../../shared/apiKeyBatch.js";
 
-type ConnectionsSegment = "session" | "apikey" | "tokens";
+type ConnectionsSegment = "session" | "apikey";
 
 const ACCOUNT_SEGMENTS: Array<{
   value: ConnectionsSegment;
@@ -60,13 +59,6 @@ const ACCOUNT_SEGMENTS: Array<{
     tooltip: "只有 Base URL + Key 时使用，只负责代理调用",
     tooltipSide: "bottom",
     tooltipAlign: "center",
-  },
-  {
-    value: "tokens",
-    label: "账号令牌管理",
-    tooltip: "从账号同步或手动维护，供路由实际调用",
-    tooltipSide: "bottom",
-    tooltipAlign: "end",
   },
 ];
 
@@ -100,7 +92,7 @@ function createRebindForm(platformUserId = "") {
 
 function resolveConnectionsSegment(search: string): ConnectionsSegment {
   const rawSegment = new URLSearchParams(search).get("segment");
-  if (rawSegment === "apikey" || rawSegment === "tokens") return rawSegment;
+  if (rawSegment === "apikey") return rawSegment;
   return "session";
 }
 
@@ -135,8 +127,6 @@ export default function Accounts() {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>(
     {},
   );
-  const [embeddedTokenActions, setEmbeddedTokenActions] =
-    useState<React.ReactNode>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState<number[]>([]);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<null | {
@@ -291,7 +281,6 @@ export default function Accounts() {
     [accounts, sortMode],
   );
   const visibleAccounts = useMemo(() => {
-    if (activeSegment === "tokens") return [];
     return sortedAccounts.filter(
       (account) => resolveAccountCredentialMode(account) === activeSegment,
     );
@@ -317,19 +306,7 @@ export default function Accounts() {
   };
 
   useEffect(() => {
-    if (activeSegment !== "tokens") return;
-    closeAddPanel();
-    if (rebindTarget) closeRebindPanel();
-    setEditingAccount(null);
-  }, [activeSegment]);
-
-  useEffect(() => {
-    if (activeSegment === "tokens") return;
-    setEmbeddedTokenActions(null);
-  }, [activeSegment]);
-
-  useEffect(() => {
-    if (activeSegment === "tokens" || !loaded) return;
+    if (!loaded) return;
     const params = new URLSearchParams(location.search);
     const shouldOpenCreate = isTruthyFlag(params.get("create"));
     const requestedSiteId = parsePositiveInt(params.get("siteId"));
@@ -1148,7 +1125,7 @@ export default function Accounts() {
 
   useEffect(() => {
     const { accountId, openRebind } = readFocusAccountIntent(location.search);
-    if (!accountId || !loaded || activeSegment === "tokens") return;
+    if (!accountId || !loaded) return;
 
     const target = visibleAccounts.find((account) => account.id === accountId);
     const row = rowRefs.current.get(accountId);
@@ -1212,8 +1189,7 @@ export default function Accounts() {
     <div className="animate-fade-in">
       <div className="page-header">
         <h2 className="page-title">{tr("连接管理")}</h2>
-        {activeSegment !== "tokens" && (
-          <div className="page-actions accounts-page-actions">
+        <div className="page-actions accounts-page-actions">
             {isMobile ? (
               <>
                 <button
@@ -1286,9 +1262,7 @@ export default function Accounts() {
             >
               {showAdd ? tr("取消") : tr("+ 添加连接")}
             </button>
-          </div>
-        )}
-        {activeSegment === "tokens" && embeddedTokenActions}
+        </div>
       </div>
 
       <ResponsiveFilterPanel
@@ -1408,7 +1382,7 @@ export default function Accounts() {
         }
       />
 
-      {activeSegment !== "tokens" && selectedAccountIds.length > 0 && (
+      {selectedAccountIds.length > 0 && (
         <ResponsiveBatchActionBar
           isMobile={isMobile}
           info={`已选 ${selectedAccountIds.length} 项`}
@@ -1449,13 +1423,7 @@ export default function Accounts() {
         </ResponsiveBatchActionBar>
       )}
 
-      {activeSegment === "tokens" ? (
-        <TokensPanel
-          embedded
-          onEmbeddedActionsChange={setEmbeddedTokenActions}
-        />
-      ) : (
-        <>
+      <>
           <CenteredModal
             open={showAdd}
             onClose={closeAddPanel}
@@ -1915,7 +1883,7 @@ export default function Accounts() {
               >
                 <div className="info-tip">
                   API Key
-                  连接只用于代理转发，不会自动派生账号令牌。系统会按站点平台能力自动引导到
+                  连接只用于代理转发。系统会按站点平台能力自动引导到
                   Session 或 API Key 创建流程。
                 </div>
                 {createIntentPreset && (
@@ -3061,8 +3029,7 @@ export default function Accounts() {
               </div>
             )}
           </div>
-        </>
-      )}
+      </>
 
       <AccountModelsModal
         modelModal={modelModal}

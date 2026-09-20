@@ -16,21 +16,21 @@ export function getRouteRoutingStrategyLabel(value?: RouteRoutingStrategy | null
 export function getRouteRoutingStrategyDescription(value?: RouteRoutingStrategy | null): string {
   const strategy = normalizeRouteRoutingStrategyValue(value);
   if (strategy === 'round_robin') {
-    return tr('忽略 P 值，按全局顺序依次调用；连续失败 3 次后进入分级冷却');
+    return tr('全局调用顺序依次轮换，不看 P 值（不作硬优先级主备区分）；连续失败后进入冷却');
   }
   if (strategy === 'stable_first') {
-    return tr('先避开最近失败或不健康站点，再在稳定池里按顺序轮询；P 值表示轮询顺位');
+    return tr('优先避让失败或不健康候选，在稳定池按轮询顺位依次轮换；P 值表示顺位参考');
   }
-  return tr('P 值是硬优先级，只会在当前最高可用优先级内结合权重、成本和健康度随机选择');
+  return tr('P 值是优先级层级，优先使用最高可用层；同层结合权重、成本和健康度综合选择');
 }
 
 export function getRouteRoutingStrategyHint(value?: RouteRoutingStrategy | null): string {
   const strategy = normalizeRouteRoutingStrategyValue(value);
   if (strategy === 'round_robin') {
-    return tr('当前策略不看 P 值；如果之后切回其他策略，拖拽保存的顺序仍会保留。');
+    return tr('当前策略按全局顺序轮询，不按 P 值区分主备层级；保存后立即生效。');
   }
   if (strategy === 'stable_first') {
-    return tr('当前策略下，稳定站点会按 P 顺序轮换；不稳定站点会被自动降权或临时避让。');
+    return tr('当前策略优先保障稳定性，异常通道临时避让，稳定通道按顺位轮询；保存后立即生效。');
   }
-  return tr('只要更高优先级还有可用通道，后面的通道本次就不会参与选择。');
+  return tr('只要更高优先级层级仍有可用通道，后面的层级本次就不会参与选择；保存后立即生效。');
 }

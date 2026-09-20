@@ -1,18 +1,10 @@
 import { z } from 'zod';
 
-const downstreamExcludedCredentialRefSchema = z.union([
-  z.object({
-    kind: z.literal('account_token'),
-    siteId: z.union([z.number(), z.string()]),
-    accountId: z.union([z.number(), z.string()]),
-    tokenId: z.union([z.number(), z.string()]),
-  }),
-  z.object({
-    kind: z.literal('default_api_key'),
-    siteId: z.union([z.number(), z.string()]),
-    accountId: z.union([z.number(), z.string()]),
-  }),
-]);
+const downstreamExcludedCredentialRefSchema = z.object({
+  kind: z.literal('default_api_key'),
+  siteId: z.union([z.number(), z.string()]),
+  accountId: z.union([z.number(), z.string()]),
+});
 
 const downstreamApiKeyPayloadSchema = z.object({
   name: z.string().optional(),

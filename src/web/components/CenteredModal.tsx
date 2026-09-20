@@ -23,8 +23,8 @@ export default function CenteredModal({
   footer,
   maxWidth = 860,
   bodyStyle,
-  closeOnBackdrop = false,
-  closeOnEscape = false,
+  closeOnBackdrop = true,
+  closeOnEscape = true,
   showCloseButton = true,
 }: CenteredModalProps) {
   const presence = useAnimatedVisibility(open, 220);

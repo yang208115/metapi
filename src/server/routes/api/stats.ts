@@ -6,9 +6,6 @@ import { refreshModelsForAccount } from "../../services/modelService.js";
 import * as routeRefreshWorkflow from "../../services/routeRefreshWorkflow.js";
 import { buildModelAnalysis } from "../../services/modelAnalysisService.js";
 import {
-  fetchModelPricingCatalog,
-} from "../../services/modelPricingService.js";
-import {
   getBackgroundTask,
   getRunningTaskByDedupeKey,
   startBackgroundTask,
@@ -23,8 +20,6 @@ import {
   listProxyDebugTraces,
 } from "../../services/proxyDebugTraceStore.js";
 import { parseProxyLogMessageMeta } from "../../services/proxyLogMessage.js";
-import { requiresManagedAccountTokens } from "../../services/accountExtraConfig.js";
-import { ACCOUNT_TOKEN_VALUE_STATUS_READY } from "../../services/accountTokenService.js";
 import {
   formatLocalDateTime,
   formatUtcSqlDateTime,
@@ -78,8 +73,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const MODELS_CACHE_TTL_MS = 15_000;
-const limitModelTokenCandidatesRead = createRateLimitGuard({
-  bucket: "models-token-candidates-read",
+const limitModelRouteCandidatesRead = createRateLimitGuard({
+  bucket: "models-route-candidates-read",
   max: 30,
   windowMs: 60_000,
 });
@@ -629,11 +624,17 @@ export async function statsRoutes(app: FastifyInstance) {
   const proxyLogModelAnalysisFields = buildProxyLogModelAnalysisSelectFields();
   const proxyLogSiteTrendFields = buildProxyLogSiteTrendSelectFields();
 
-  app.get<{ Querystring: { refresh?: string; view?: string } }>(
+  app.get<{ Querystring: { refresh?: string; view?: string; days?: string; siteId?: string; platform?: string } }>(
     "/api/stats/dashboard",
     async (request, reply) => {
       const forceRefresh = parseBooleanFlag(request.query.refresh);
       const view = normalizeDashboardView(request.query.view);
+      const insightOptions = {
+        forceRefresh,
+        days: Math.min(90, Math.max(1, Number.parseInt(request.query.days || '7', 10) || 7)),
+        siteId: normalizeProxyLogSiteId(request.query.siteId),
+        platform: request.query.platform,
+      };
       if (view === "summary") {
         const snapshot = await getDashboardSummarySnapshot({ forceRefresh });
         reply.header("x-dashboard-summary-cache", snapshot.cacheStatus);
@@ -643,7 +644,7 @@ export async function statsRoutes(app: FastifyInstance) {
         };
       }
       if (view === "insights") {
-        const snapshot = await getDashboardInsightsSnapshot({ forceRefresh });
+        const snapshot = await getDashboardInsightsSnapshot(insightOptions);
         reply.header("x-dashboard-insights-cache", snapshot.cacheStatus);
         return {
           generatedAt: snapshot.generatedAt,
@@ -653,7 +654,7 @@ export async function statsRoutes(app: FastifyInstance) {
 
       const [summary, insights] = await Promise.all([
         getDashboardSummarySnapshot({ forceRefresh }),
-        getDashboardInsightsSnapshot({ forceRefresh }),
+        getDashboardInsightsSnapshot(insightOptions),
       ]);
       reply.header("x-dashboard-summary-cache", summary.cacheStatus);
       reply.header("x-dashboard-insights-cache", insights.cacheStatus);
@@ -1140,36 +1141,11 @@ export async function statsRoutes(app: FastifyInstance) {
     },
   );
 
-  // Available models from persisted account and token state.
+  // Available models from persisted account state.
   app.get("/api/models", async () => {
     const cachedModels = readModelsCache();
     if (cachedModels) return { models: cachedModels };
 
-    const availability = await db
-      .select()
-      .from(schema.tokenModelAvailability)
-      .innerJoin(
-        schema.accountTokens,
-        eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id),
-      )
-      .innerJoin(
-        schema.accounts,
-        eq(schema.accountTokens.accountId, schema.accounts.id),
-      )
-      .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-      .where(
-        and(
-          eq(schema.tokenModelAvailability.available, true),
-          eq(schema.accountTokens.enabled, true),
-          eq(
-            schema.accountTokens.valueStatus,
-            ACCOUNT_TOKEN_VALUE_STATUS_READY,
-          ),
-          eq(schema.accounts.status, "active"),
-          eq(schema.sites.status, "active"),
-        ),
-      )
-      .all();
     const accountAvailability = await db
       .select()
       .from(schema.modelAvailability)
@@ -1206,7 +1182,6 @@ export async function statsRoutes(app: FastifyInstance) {
       site: string;
       username: string | null;
       latency: number | null;
-      tokens: Array<{ id: number; name: string; isDefault: boolean }>;
     };
     const modelMap = new Map<string, { name: string; accountsById: Map<number, ModelAccount> }>();
     const ensureModel = (name: string) => {
@@ -1227,27 +1202,7 @@ export async function statsRoutes(app: FastifyInstance) {
       if (existing.latency == null || (account.latency != null && account.latency < existing.latency)) {
         existing.latency = account.latency;
       }
-      for (const token of account.tokens) {
-        if (!existing.tokens.some((item) => item.id === token.id)) {
-          existing.tokens.push(token);
-        }
-      }
     };
-
-    for (const row of availability) {
-      const model = row.token_model_availability;
-      const token = row.account_tokens;
-      const account = row.accounts;
-      const site = row.sites;
-      if (!model.available || !token.enabled || account.status !== "active" || site.status !== "active") continue;
-      mergeAccount(model.modelName, {
-        id: account.id,
-        site: site.name,
-        username: account.username,
-        latency: model.latencyMs,
-        tokens: [{ id: token.id, name: token.name, isDefault: !!token.isDefault }],
-      });
-    }
 
     for (const row of accountAvailability) {
       const model = row.model_availability;
@@ -1259,7 +1214,6 @@ export async function statsRoutes(app: FastifyInstance) {
         site: site.name,
         username: account.username,
         latency: model.latencyMs,
-        tokens: [],
       });
     }
 
@@ -1272,7 +1226,6 @@ export async function statsRoutes(app: FastifyInstance) {
       return {
         name: model.name,
         accountCount: accounts.length,
-        tokenCount: accounts.reduce((sum, account) => sum + account.tokens.length, 0),
         avgLatency: latencyValues.length > 0
           ? Math.round(latencyValues.reduce((sum, latency) => sum + latency, 0) / latencyValues.length)
           : null,
@@ -1291,30 +1244,9 @@ export async function statsRoutes(app: FastifyInstance) {
   });
 
   app.get(
-    "/api/models/token-candidates",
-    { preHandler: [limitModelTokenCandidatesRead] },
+    "/api/models/route-candidates",
+    { preHandler: [limitModelRouteCandidatesRead] },
     async () => {
-      const resolveTokenGroupLabel = (
-        tokenGroup: string | null,
-        tokenName: string | null,
-      ): string | null => {
-        const explicit = (tokenGroup || "").trim();
-        if (explicit) return explicit;
-
-        const name = (tokenName || "").trim();
-        if (!name) return null;
-        const normalized = name.toLowerCase();
-        if (
-          normalized === "default" ||
-          normalized === "默认" ||
-          /^default($|[-_\s])/.test(normalized)
-        ) {
-          return "default";
-        }
-        if (/^token-\d+$/.test(normalized)) return null;
-        return name;
-      };
-
       // Load global allowed models whitelist
       const globalAllowedModels = new Set(
         config.globalAllowedModels
@@ -1322,31 +1254,6 @@ export async function statsRoutes(app: FastifyInstance) {
           .filter(Boolean),
       );
 
-      const rows = await db
-        .select()
-        .from(schema.tokenModelAvailability)
-        .innerJoin(
-          schema.accountTokens,
-          eq(schema.tokenModelAvailability.tokenId, schema.accountTokens.id),
-        )
-        .innerJoin(
-          schema.accounts,
-          eq(schema.accountTokens.accountId, schema.accounts.id),
-        )
-        .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-        .where(
-          and(
-            eq(schema.tokenModelAvailability.available, true),
-            eq(schema.accountTokens.enabled, true),
-            eq(
-              schema.accountTokens.valueStatus,
-              ACCOUNT_TOKEN_VALUE_STATUS_READY,
-            ),
-            eq(schema.accounts.status, "active"),
-            eq(schema.sites.status, "active"),
-          ),
-        )
-        .all();
       const availableModelRows = await db
         .select({
           modelName: schema.modelAvailability.modelName,
@@ -1377,242 +1284,26 @@ export async function statsRoutes(app: FastifyInstance) {
         string,
         Array<{
           accountId: number;
-          tokenId: number;
-          tokenName: string;
-          isDefault: boolean;
           username: string | null;
           siteId: number;
           siteName: string;
         }>
       > = {};
-      const coveredAccountModelSet = new Set<string>();
-      const coveredGroupsByAccountModel = new Map<
-        string,
-        Map<string, string>
-      >();
-      const unknownGroupCoverageByAccountModel = new Set<string>();
-      const modelsWithoutToken: Record<
-        string,
-        Array<{
-          accountId: number;
-          username: string | null;
-          siteId: number;
-          siteName: string;
-        }>
-      > = {};
-      const modelsMissingTokenGroups: Record<
-        string,
-        Array<{
-          accountId: number;
-          username: string | null;
-          siteId: number;
-          siteName: string;
-          missingGroups: string[];
-          requiredGroups: string[];
-          availableGroups: string[];
-          groupCoverageUncertain?: boolean;
-        }>
-      > = {};
-      let hasAnyTokenGroupSignals = false;
-
-      for (const row of rows) {
-        const modelName = (row.token_model_availability.modelName || "").trim();
+      for (const row of availableModelRows) {
+        const modelName = (row.modelName || "").trim();
         if (!modelName) continue;
-        const accountModelKey = `${row.accounts.id}::${modelName.toLowerCase()}`;
-        coveredAccountModelSet.add(accountModelKey);
-
-        const resolvedTokenGroup = resolveTokenGroupLabel(
-          row.account_tokens.tokenGroup,
-          row.account_tokens.name,
-        );
-        if (resolvedTokenGroup) {
-          hasAnyTokenGroupSignals = true;
-          if (!coveredGroupsByAccountModel.has(accountModelKey)) {
-            coveredGroupsByAccountModel.set(
-              accountModelKey,
-              new Map<string, string>(),
-            );
-          }
-          const groupKey = resolvedTokenGroup.toLowerCase();
-          if (
-            !coveredGroupsByAccountModel.get(accountModelKey)!.has(groupKey)
-          ) {
-            coveredGroupsByAccountModel
-              .get(accountModelKey)!
-              .set(groupKey, resolvedTokenGroup);
-          }
-        } else {
-          unknownGroupCoverageByAccountModel.add(accountModelKey);
-        }
-
         if (!result[modelName]) result[modelName] = [];
         if (
           result[modelName].some(
-            (item) => item.tokenId === row.account_tokens.id,
+            (item) => item.accountId === row.accountId,
           )
-        )
-          continue;
+        ) continue;
         result[modelName].push({
-          accountId: row.accounts.id,
-          tokenId: row.account_tokens.id,
-          tokenName: row.account_tokens.name,
-          isDefault: !!row.account_tokens.isDefault,
-          username: row.accounts.username,
-          siteId: row.sites.id,
-          siteName: row.sites.name,
-        });
-      }
-
-      for (const row of availableModelRows) {
-        if (!requiresManagedAccountTokens(row)) continue;
-        const modelName = (row.modelName || "").trim();
-        if (!modelName) continue;
-        const coverageKey = `${row.accountId}::${modelName.toLowerCase()}`;
-        if (coveredAccountModelSet.has(coverageKey)) continue;
-        if (!modelsWithoutToken[modelName]) modelsWithoutToken[modelName] = [];
-        if (
-          modelsWithoutToken[modelName].some(
-            (item) => item.accountId === row.accountId,
-          )
-        )
-          continue;
-        modelsWithoutToken[modelName].push({
           accountId: row.accountId,
           username: row.username,
           siteId: row.siteId,
           siteName: row.siteName,
         });
-      }
-
-      const accountIdsForGroupHints = new Set(
-        availableModelRows
-          .filter((row) => requiresManagedAccountTokens(row))
-          .map((row) => row.accountId),
-      );
-      const requiredGroupsByAccountModel = new Map<
-        string,
-        Map<string, string>
-      >();
-      const hasPotentialGroupHints =
-        hasAnyTokenGroupSignals || unknownGroupCoverageByAccountModel.size > 0;
-
-      if (hasPotentialGroupHints && accountIdsForGroupHints.size > 0) {
-        const accountRows = await db
-          .select()
-          .from(schema.accounts)
-          .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-          .where(
-            and(
-              eq(schema.accounts.status, "active"),
-              eq(schema.sites.status, "active"),
-            ),
-          )
-          .all();
-
-        const metadataResults = await Promise.all(
-          accountRows
-            .filter((row) => accountIdsForGroupHints.has(row.accounts.id))
-            .map(async (row) => {
-              try {
-                const catalog = await fetchModelPricingCatalog({
-                  site: {
-                    id: row.sites.id,
-                    url: row.sites.url,
-                    platform: row.sites.platform,
-                  },
-                  account: {
-                    id: row.accounts.id,
-                    accessToken: row.accounts.accessToken,
-                    apiToken: row.accounts.apiToken,
-                  },
-                  modelName: "__metadata__",
-                  totalTokens: 0,
-                });
-                return { accountId: row.accounts.id, catalog };
-              } catch {
-                return {
-                  accountId: row.accounts.id,
-                  catalog: null as Awaited<
-                    ReturnType<typeof fetchModelPricingCatalog>
-                  >,
-                };
-              }
-            }),
-        );
-
-        for (const result of metadataResults) {
-          if (!result.catalog) continue;
-          for (const model of result.catalog.models) {
-            const modelName = (model.modelName || "").trim();
-            if (!modelName) continue;
-            const groups = new Map<string, string>();
-            for (const rawGroup of model.enableGroups || []) {
-              const group = String(rawGroup || "").trim();
-              if (!group) continue;
-              const groupKey = group.toLowerCase();
-              if (!groups.has(groupKey)) groups.set(groupKey, group);
-            }
-            if (groups.size === 0) continue;
-            requiredGroupsByAccountModel.set(
-              `${result.accountId}::${modelName.toLowerCase()}`,
-              groups,
-            );
-          }
-        }
-      }
-
-      for (const row of availableModelRows) {
-        if (!requiresManagedAccountTokens(row)) continue;
-        const modelName = (row.modelName || "").trim();
-        if (!modelName) continue;
-        const accountModelKey = `${row.accountId}::${modelName.toLowerCase()}`;
-
-        const requiredGroups =
-          requiredGroupsByAccountModel.get(accountModelKey);
-        if (!requiredGroups || requiredGroups.size === 0) continue;
-
-        const availableGroups =
-          coveredGroupsByAccountModel.get(accountModelKey) ||
-          new Map<string, string>();
-        const missingGroups = Array.from(requiredGroups.entries())
-          .filter(([groupKey]) => !availableGroups.has(groupKey))
-          .map(([, label]) => label);
-        if (missingGroups.length === 0) continue;
-
-        if (!modelsMissingTokenGroups[modelName])
-          modelsMissingTokenGroups[modelName] = [];
-        if (
-          modelsMissingTokenGroups[modelName].some(
-            (item) => item.accountId === row.accountId,
-          )
-        )
-          continue;
-        const hintRow = {
-          accountId: row.accountId,
-          username: row.username,
-          siteId: row.siteId,
-          siteName: row.siteName,
-          missingGroups: missingGroups.sort((a, b) => a.localeCompare(b)),
-          requiredGroups: Array.from(requiredGroups.values()).sort((a, b) =>
-            a.localeCompare(b),
-          ),
-          availableGroups: Array.from(availableGroups.values()).sort((a, b) =>
-            a.localeCompare(b),
-          ),
-        } as {
-          accountId: number;
-          username: string | null;
-          siteId: number;
-          siteName: string;
-          missingGroups: string[];
-          requiredGroups: string[];
-          availableGroups: string[];
-          groupCoverageUncertain?: boolean;
-        };
-        if (unknownGroupCoverageByAccountModel.has(accountModelKey)) {
-          hintRow.groupCoverageUncertain = true;
-        }
-        modelsMissingTokenGroups[modelName].push(hintRow);
       }
 
       const endpointTypesByModel: Record<string, string[]> = {};
@@ -1630,47 +1321,19 @@ export async function statsRoutes(app: FastifyInstance) {
 
       // Apply model whitelist filter if configured
       const filteredResult: typeof result = {};
-      const filteredModelsWithoutToken: typeof modelsWithoutToken = {};
-      const filteredModelsMissingTokenGroups: typeof modelsMissingTokenGroups =
-        {};
 
       if (globalAllowedModels.size > 0) {
-        // Filter result
         for (const [modelName, candidates] of Object.entries(result)) {
           if (globalAllowedModels.has(modelName.toLowerCase().trim())) {
             filteredResult[modelName] = candidates;
           }
         }
-        // Filter modelsWithoutToken
-        for (const [modelName, accounts] of Object.entries(
-          modelsWithoutToken,
-        )) {
-          if (globalAllowedModels.has(modelName.toLowerCase().trim())) {
-            filteredModelsWithoutToken[modelName] = accounts;
-          }
-        }
-        // Filter modelsMissingTokenGroups
-        for (const [modelName, accounts] of Object.entries(
-          modelsMissingTokenGroups,
-        )) {
-          if (globalAllowedModels.has(modelName.toLowerCase().trim())) {
-            filteredModelsMissingTokenGroups[modelName] = accounts;
-          }
-        }
       } else {
-        // No whitelist configured, return all models (backward compatible)
         Object.assign(filteredResult, result);
-        Object.assign(filteredModelsWithoutToken, modelsWithoutToken);
-        Object.assign(
-          filteredModelsMissingTokenGroups,
-          modelsMissingTokenGroups,
-        );
       }
 
       return {
         models: filteredResult,
-        modelsWithoutToken: filteredModelsWithoutToken,
-        modelsMissingTokenGroups: filteredModelsMissingTokenGroups,
         endpointTypesByModel,
       };
     },
@@ -1692,26 +1355,30 @@ export async function statsRoutes(app: FastifyInstance) {
   );
 
   // Site distribution – per-site aggregate data
-  app.get<{ Querystring: { days?: string; refresh?: string } }>(
+  app.get<{ Querystring: { days?: string; refresh?: string; siteId?: string; platform?: string } }>(
     "/api/stats/site-distribution",
     async (request) => {
       const snapshot = await getSiteStatsSnapshot({
-        days: request.query.days ? parseInt(request.query.days, 10) : 7,
+        days: Math.min(90, Math.max(1, Number.parseInt(request.query.days || '7', 10) || 7)),
         forceRefresh: parseBooleanFlag(request.query.refresh),
+        siteId: normalizeProxyLogSiteId(request.query.siteId),
+        platform: request.query.platform,
       });
-      return { distribution: snapshot.payload.distribution };
+      return { distribution: snapshot.payload.distribution, generatedAt: snapshot.generatedAt, cacheStatus: snapshot.cacheStatus };
     },
   );
 
   // Site trend – daily spend/calls broken down by site
-  app.get<{ Querystring: { days?: string; refresh?: string } }>(
+  app.get<{ Querystring: { days?: string; refresh?: string; siteId?: string; platform?: string } }>(
     "/api/stats/site-trend",
     async (request) => {
       const snapshot = await getSiteStatsSnapshot({
-        days: request.query.days ? parseInt(request.query.days, 10) : 7,
+        days: Math.min(90, Math.max(1, Number.parseInt(request.query.days || '7', 10) || 7)),
         forceRefresh: parseBooleanFlag(request.query.refresh),
+        siteId: normalizeProxyLogSiteId(request.query.siteId),
+        platform: request.query.platform,
       });
-      return { trend: snapshot.payload.trend };
+      return { trend: snapshot.payload.trend, generatedAt: snapshot.generatedAt, cacheStatus: snapshot.cacheStatus };
     },
   );
 

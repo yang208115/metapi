@@ -9,10 +9,11 @@ type TabKey = 'spend' | 'trend' | 'calls' | 'rank';
 interface SpendDistributionItem { model: string; spend: number; calls: number; }
 interface SpendTrendItem { day: string; spend: number; }
 interface CallsDistributionItem { model: string; calls: number; share: number; }
-interface CallRankingItem { model: string; calls: number; successRate: number; avgLatencyMs: number; spend: number; tokens: number; }
+interface CallRankingItem { model: string; calls: number; successRate: number; avgLatencyMs: number | null; spend: number; tokens: number; }
 
 interface ModelAnalysisData {
   totals?: { spend?: number; calls?: number; tokens?: number };
+  costSemanticsNote?: string;
   spendDistribution?: SpendDistributionItem[];
   spendTrend?: SpendTrendItem[];
   callsDistribution?: CallsDistributionItem[];
@@ -69,6 +70,23 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
   const spendTrend = data?.spendTrend || [];
   const callsDistribution = (data?.callsDistribution || []).slice(0, 10);
   const callRanking = (data?.callRanking || []).slice(0, 10);
+  const callsDistributionWithOther = useMemo(() => {
+    const totalCalls = Math.max(0, Math.round(totals.calls));
+    const topCalls = callsDistribution.reduce(
+      (sum, item) => sum + Math.max(0, Math.round(toSafeNumber(item.calls))),
+      0,
+    );
+    const otherCalls = Math.max(0, totalCalls - topCalls);
+    if (otherCalls <= 0 || totalCalls <= 0) return callsDistribution;
+    return [
+      ...callsDistribution,
+      {
+        model: '其他',
+        calls: otherCalls,
+        share: (otherCalls / totalCalls) * 100,
+      },
+    ];
+  }, [callsDistribution, totals.calls]);
 
   const hasData = totals.calls > 0
     || spendDistribution.length > 0
@@ -98,16 +116,16 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
 
   const callsPieSpec = useMemo(() => ({
     type: 'pie' as const,
-    data: [{ id: 'data', values: callsDistribution.map(d => ({ model: d.model, calls: toSafeNumber(d.calls) })) }],
+    data: [{ id: 'data', values: callsDistributionWithOther.map(d => ({ model: d.model, calls: toSafeNumber(d.calls) })) }],
     valueField: 'calls', categoryField: 'model',
     outerRadius: 0.8, innerRadius: 0.55,
     pie: { style: { cornerRadius: 4, padAngle: 0.02 } },
     label: { visible: true, position: 'outside', formatter: '{_percent_}%', style: { fill: labelColor } },
     legends: { visible: false },
     animation: true,
-    color: ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'],
+    color: ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#94a3b8'],
     background: 'transparent',
-  }), [callsDistribution, labelColor]);
+  }), [callsDistributionWithOther, labelColor]);
 
   if (!hasData) return <EmptyBlock />;
 
@@ -127,6 +145,9 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
           <div className="stat-summary-card-label">总 Tokens</div>
           <div className="stat-summary-card-value">{formatCompactTokenMetric(totals.tokens)}</div>
         </div>
+      </div>
+      <div style={{ margin: '-8px 0 16px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+        {data?.costSemanticsNote || '费用口径：显式 0 按 0 统计；历史聚合可能包含旧估算口径。'}
       </div>
 
       {/* Pill Tabs */}
@@ -174,14 +195,16 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
             <VChart spec={callsPieSpec} />
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 10, padding: '0 4px' }}>
-            {callsDistribution.map((d, idx) => {
-              const pieColors = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
+            {callsDistributionWithOther.map((d, idx) => {
+              const pieColors = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#94a3b8'];
+              const isOther = d.model === '其他';
               return (
                 <span key={d.model} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--color-text-secondary)' }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: pieColors[idx % pieColors.length], flexShrink: 0 }} />
-                  <InlineBrandIcon model={d.model} size={13} />
+                  {!isOther && <InlineBrandIcon model={d.model} size={13} />}
                   <span style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.model}</span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--color-text-primary)' }}>{d.calls}</span>
+                  <span>{formatPercent(d.share)}</span>
                 </span>
               );
             })}
@@ -205,11 +228,12 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
             <tbody>
               {callRanking.map((item, index) => {
                 const latMs = item.avgLatencyMs;
-                const latSec = latMs / 1000;
+                const hasLatency = typeof latMs === 'number' && Number.isFinite(latMs);
+                const latSec = hasLatency ? latMs / 1000 : 0;
                 // ≤15s green, 15-60s gradient green→yellow→red, >60s or failed → red
-                let latColor: string;
-                let latBg: string;
-                if (latSec <= 15) {
+                let latColor = 'var(--color-text-muted)';
+                let latBg = 'var(--color-bg)';
+                if (hasLatency && latSec <= 15) {
                   // green gradient: 0s=#22c55e → 15s=blend towards yellow
                   const t = Math.min(latSec / 15, 1);
                   const r = Math.round(34 + t * (245 - 34));
@@ -217,7 +241,7 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
                   const b = Math.round(94 + t * (11 - 94));
                   latColor = `rgb(${r},${g},${b})`;
                   latBg = `rgba(${r},${g},${b},0.08)`;
-                } else if (latSec <= 60) {
+                } else if (hasLatency && latSec <= 60) {
                   // yellow→red gradient: 15s=#f59e0b → 60s=#ef4444
                   const t = Math.min((latSec - 15) / 45, 1);
                   const r = Math.round(245 + t * (239 - 245));
@@ -225,11 +249,15 @@ export default function ModelAnalysisPanel({ data }: ModelAnalysisPanelProps) {
                   const b = Math.round(11 + t * (68 - 11));
                   latColor = `rgb(${r},${g},${b})`;
                   latBg = `rgba(${r},${g},${b},0.08)`;
-                } else {
+                } else if (hasLatency) {
                   latColor = '#ef4444';
                   latBg = 'rgba(239,68,68,0.08)';
                 }
-                const latText = latMs >= 1000 ? `${(latMs / 1000).toFixed(latSec >= 60 ? 0 : 1)}s` : `${latMs}ms`;
+                const latText = !hasLatency
+                  ? '—'
+                  : latMs >= 1000
+                    ? `${(latMs / 1000).toFixed(latSec >= 60 ? 0 : 1)}s`
+                    : `${latMs}ms`;
                 const rateColor = item.successRate >= 90 ? '#16a34a' : item.successRate >= 60 ? '#d97706' : '#dc2626';
                 const rateBg = item.successRate >= 90 ? 'rgba(34,197,94,0.1)' : item.successRate >= 60 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)';
 

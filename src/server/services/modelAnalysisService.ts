@@ -45,7 +45,7 @@ interface ModelAnalysisResult {
     model: string;
     calls: number;
     successRate: number;
-    avgLatencyMs: number;
+    avgLatencyMs: number | null;
     spend: number;
     tokens: number;
   }>;
@@ -65,6 +65,7 @@ export interface ModelAnalysisDailyUsageRow {
   totalTokens: number;
   totalSpend: number;
   totalLatencyMs: number;
+  latencyCount: number;
 }
 
 interface MutableModelStats {
@@ -72,6 +73,7 @@ interface MutableModelStats {
   calls: number;
   success: number;
   latencyTotal: number;
+  latencyCount: number;
   tokens: number;
   spend: number;
 }
@@ -115,8 +117,10 @@ export function resolveModelAnalysisSpend(
   log: Pick<ProxyLogLike, 'estimatedCost'>,
   tokens: number,
 ): number {
-  const explicit = toSafeNumber(log.estimatedCost);
-  if (explicit > 0) return explicit;
+  const explicit = log.estimatedCost;
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit >= 0) {
+    return explicit;
+  }
   if (tokens <= 0) return 0;
   return tokens / 500000;
 }
@@ -156,7 +160,10 @@ function finalizeModelAnalysis(
       model: item.model,
       calls: item.calls,
       successRate: item.calls > 0 ? round((item.success / item.calls) * 100, 2) : 0,
-      avgLatencyMs: item.calls > 0 ? Math.round(item.latencyTotal / item.calls) : 0,
+      avgLatencyMs:
+        item.latencyCount > 0
+          ? Math.round(item.latencyTotal / item.latencyCount)
+          : null,
       spend: round(item.spend, 6),
       tokens: item.tokens,
     }));
@@ -222,6 +229,7 @@ export function buildModelAnalysis(
       calls: 0,
       success: 0,
       latencyTotal: 0,
+      latencyCount: 0,
       tokens: 0,
       spend: 0,
     };
@@ -229,6 +237,7 @@ export function buildModelAnalysis(
     stat.calls += 1;
     stat.success += isSuccess ? 1 : 0;
     stat.latencyTotal += latency;
+    stat.latencyCount += latency > 0 ? 1 : 0;
     stat.tokens += tokens;
     stat.spend += spend;
     modelMap.set(model, stat);
@@ -268,12 +277,14 @@ export function buildModelAnalysisFromDailyUsage(
     const tokens = toPositiveInt(row.totalTokens);
     const spend = Math.max(0, toSafeNumber(row.totalSpend));
     const latencyTotal = toPositiveInt(row.totalLatencyMs);
+    const latencyCount = toPositiveInt(row.latencyCount);
 
     const stat = modelMap.get(model) ?? {
       model,
       calls: 0,
       success: 0,
       latencyTotal: 0,
+      latencyCount: 0,
       tokens: 0,
       spend: 0,
     };
@@ -281,6 +292,7 @@ export function buildModelAnalysisFromDailyUsage(
     stat.calls += calls;
     stat.success += successCount;
     stat.latencyTotal += latencyTotal;
+    stat.latencyCount += latencyCount;
     stat.tokens += tokens;
     stat.spend += spend;
     modelMap.set(model, stat);

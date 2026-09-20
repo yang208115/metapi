@@ -28,11 +28,8 @@ import type {
   RouteChannelRouteUnit,
   RouteDecision,
   RouteDecisionCandidate,
-  MissingTokenRouteSiteActionItem,
-  MissingTokenGroupRouteSiteActionItem,
   RouteRoutingStrategy,
 } from './types.js';
-import type { RouteCandidateView, RouteTokenOption } from '../helpers/routeModelCandidatesIndex.js';
 import { SortableChannelRow } from './SortableChannelRow.js';
 import {
   getRouteRoutingStrategyLabel,
@@ -79,19 +76,11 @@ type RouteCardProps = {
   routeDecision: RouteDecision | null;
   loadingDecision: boolean;
   // Channel interaction
-  candidateView: RouteCandidateView;
-  channelTokenDraft: Record<number, number>;
   updatingChannel: Record<number, boolean>;
   savingPriority: boolean;
-  onTokenDraftChange: (channelId: number, tokenId: number) => void;
-  onSaveToken: (routeId: number, channelId: number, accountId: number) => void;
   onDeleteChannel: (channelId: number, routeId: number) => void;
   onToggleChannelEnabled: (channelId: number, routeId: number, enabled: boolean) => void;
   onChannelDragEnd: (routeId: number, event: DragEndEvent) => void;
-  // Missing token hints
-  missingTokenSiteItems: MissingTokenRouteSiteActionItem[];
-  missingTokenGroupItems: MissingTokenGroupRouteSiteActionItem[];
-  onCreateTokenForMissing: (accountId: number, modelName: string) => void;
   // Add channel
   onAddChannel: (routeId: number) => void;
   // Site block model
@@ -156,7 +145,7 @@ function PriorityRailNewLayerRow({
           style={{
             minWidth: 84,
             padding: '5px 10px',
-            borderRadius: 999,
+            borderRadius: 4,
             border: `1px dashed ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
             background: active
               ? 'color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-card))'
@@ -198,7 +187,7 @@ function PriorityRailNewLayerRow({
         style={{
           minWidth: 72,
           padding: '6px 10px',
-          borderRadius: 999,
+          borderRadius: 4,
           border: `1px dashed ${active ? 'var(--color-primary)' : 'var(--color-border)'}`,
           background: active
             ? 'color-mix(in srgb, var(--color-primary) 10%, var(--color-bg))'
@@ -269,7 +258,7 @@ function PriorityDragPreview({
   width?: number | null;
 }) {
   const resolvedWidth = Number.isFinite(width ?? Number.NaN) ? width ?? undefined : undefined;
-  const effectiveTokenName = channel.token?.name || `account-${channel.accountId}`;
+  const accountName = channel.account?.username || `account-${channel.accountId}`;
 
   return (
     <div
@@ -284,10 +273,10 @@ function PriorityDragPreview({
         gap: 10,
         alignItems: 'center',
         padding: '10px 12px',
-        borderRadius: 16,
-        border: '1px solid color-mix(in srgb, var(--color-info) 36%, var(--color-border-light))',
-        background: 'color-mix(in srgb, var(--color-bg-card) 80%, var(--color-info) 20%)',
-        boxShadow: '0 18px 34px rgba(15, 23, 42, 0.14)',
+        borderRadius: 6,
+        border: '1px solid var(--color-info)',
+        background: 'color-mix(in srgb, var(--color-bg-card) 85%, var(--color-info) 15%)',
+        boxShadow: 'var(--shadow-sm)',
         color: 'var(--color-text-primary)',
         pointerEvents: 'none',
       }}
@@ -322,7 +311,7 @@ function PriorityDragPreview({
             whiteSpace: 'nowrap',
           }}
         >
-          当前生效：{effectiveTokenName}
+          账号：{accountName}
         </span>
         {channel.sourceModel ? (
           <span className="badge badge-info" style={{ fontSize: 10 }}>
@@ -360,8 +349,6 @@ type SortableChannelShellProps = {
   compact: boolean;
   readOnlyRoute: boolean;
   savingPriority: boolean;
-  candidateView: RouteCandidateView;
-  channelTokenDraft: Record<number, number>;
   updatingChannel: Record<number, boolean>;
   activeDragChannelId: number | null;
   decisionMap: Map<number, RouteDecisionCandidate>;
@@ -369,8 +356,6 @@ type SortableChannelShellProps = {
   loadingDecision: boolean;
   channelManagementDisabled: boolean;
   routeId: number;
-  onTokenDraftChange: (channelId: number, tokenId: number) => void;
-  onSaveToken: (routeId: number, channelId: number, accountId: number) => void;
   onDeleteChannel: (channelId: number, routeId: number) => void;
   onToggleChannelEnabled: (channelId: number, routeId: number, enabled: boolean) => void;
   onSiteBlockModel: (channelId: number, routeId: number) => void;
@@ -390,8 +375,6 @@ function SortableChannelShell({
   compact,
   readOnlyRoute,
   savingPriority,
-  candidateView,
-  channelTokenDraft,
   updatingChannel,
   activeDragChannelId,
   decisionMap,
@@ -399,8 +382,6 @@ function SortableChannelShell({
   loadingDecision,
   channelManagementDisabled,
   routeId,
-  onTokenDraftChange,
-  onSaveToken,
   onDeleteChannel,
   onToggleChannelEnabled,
   onSiteBlockModel,
@@ -423,8 +404,6 @@ function SortableChannelShell({
     disabled: savingPriority || readOnlyRoute,
   });
 
-  const tokenOptions = candidateView.tokenOptionsByAccountId[channel.accountId] || [];
-  const activeTokenId = channelTokenDraft[channel.id] ?? channel.tokenId ?? 0;
   const showDesktopRailHeader = !compact && channelIndex === 0;
   const showDesktopRailLine = !compact
     && (bucketIndex < totalBucketCount - 1 || channelIndex < bucketChannelCount - 1);
@@ -520,11 +499,6 @@ function SortableChannelShell({
         readOnly={readOnlyRoute}
         channelManagementDisabled={channelManagementDisabled}
         mobile={compact}
-        tokenOptions={tokenOptions}
-        activeTokenId={activeTokenId}
-        isUpdatingToken={!!updatingChannel[channel.id]}
-        onTokenDraftChange={onTokenDraftChange}
-        onSaveToken={() => onSaveToken(routeId, channel.id, channel.accountId)}
         onDeleteChannel={() => onDeleteChannel(channel.id, routeId)}
         onToggleEnabled={(enabled) => onToggleChannelEnabled(channel.id, routeId, enabled)}
         onSiteBlockModel={channelManagementDisabled ? undefined : () => onSiteBlockModel(channel.id, routeId)}
@@ -552,18 +526,11 @@ function RouteCardInner({
   loadingChannels,
   routeDecision,
   loadingDecision,
-  candidateView,
-  channelTokenDraft,
   updatingChannel,
   savingPriority,
-  onTokenDraftChange,
-  onSaveToken,
   onDeleteChannel,
   onToggleChannelEnabled,
   onChannelDragEnd,
-  missingTokenSiteItems,
-  missingTokenGroupItems,
-  onCreateTokenForMissing,
   onAddChannel,
   onSiteBlockModel,
   expandedSourceGroupMap,
@@ -584,7 +551,6 @@ function RouteCardInner({
     ? `${tr('最近刷新')}: ${formatDateTimeMinuteLocal(route.decisionRefreshedAt)}`
     : undefined;
   const showAddChannelButton = !readOnlyRoute && !channelManagementDisabled;
-  const showMissingTokenHints = !channelManagementDisabled && (missingTokenSiteItems.length > 0 || missingTokenGroupItems.length > 0);
   const routeUnits = collectRouteUnits(channels);
   const routingStrategyOptions = [
     {
@@ -664,7 +630,7 @@ function RouteCardInner({
         color: 'var(--color-text-secondary)',
         background: 'color-mix(in srgb, var(--color-bg-card) 96%, white 4%)',
         border: '1px dashed color-mix(in srgb, var(--color-border) 88%, transparent)',
-        borderRadius: 12,
+        borderRadius: 6,
         whiteSpace: fullWidth ? 'normal' : 'nowrap',
         width: fullWidth ? '100%' : 'auto',
         marginLeft: alignRight ? 'auto' : undefined,
@@ -1104,46 +1070,9 @@ function RouteCardInner({
         </div>
       )}
 
-      {/* Missing token hints + Add channel button */}
+      {/* Add channel button */}
       <div style={{ display: 'flex', alignItems: compact ? 'stretch' : 'flex-start', flexDirection: compact ? 'column' : 'row', justifyContent: 'space-between', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-        {showMissingTokenHints ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
-            {missingTokenSiteItems.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{tr('待注册站点')}:</span>
-                {missingTokenSiteItems.map((item) => (
-                  <button
-                    key={`missing-${route.id}-${item.key}`}
-                    type="button"
-                    onClick={() => onCreateTokenForMissing(item.accountId, route.modelPattern)}
-                    className="badge badge-info missing-token-site-tag"
-                    data-tooltip={`点击跳转到令牌创建（预选 ${item.siteName}/${item.accountLabel}）`}
-                    style={{ fontSize: 10.5, cursor: 'pointer' }}
-                  >
-                    {item.siteName}
-                  </button>
-                ))}
-              </div>
-            )}
-            {missingTokenGroupItems.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{tr('缺少分组')}:</span>
-                {missingTokenGroupItems.map((item) => (
-                  <button
-                    key={`missing-group-${route.id}-${item.key}`}
-                    type="button"
-                    onClick={() => onCreateTokenForMissing(item.accountId, route.modelPattern)}
-                    className="badge badge-warning missing-token-group-tag"
-                    data-tooltip={`缺少分组：${item.missingGroups.join('、') || '未知'}${item.availableGroups.length > 0 ? `；已覆盖：${item.availableGroups.join('、')}` : ''}${item.groupCoverageUncertain ? '；当前分组覆盖存在不确定性' : ''}`}
-                    style={{ fontSize: 10.5, cursor: 'pointer' }}
-                  >
-                    {item.siteName}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (!compact && showAddChannelButton ? <div /> : null)}
+        {!compact && showAddChannelButton ? <div /> : null}
         {!compact && showAddChannelButton ? renderAddChannelButton() : null}
       </div>
 
@@ -1198,8 +1127,6 @@ function RouteCardInner({
                             compact={compact}
                             readOnlyRoute={readOnlyRoute}
                             savingPriority={savingPriority}
-                            candidateView={candidateView}
-                            channelTokenDraft={channelTokenDraft}
                             updatingChannel={updatingChannel}
                             activeDragChannelId={activeDragChannelId}
                             decisionMap={decisionMap}
@@ -1207,8 +1134,6 @@ function RouteCardInner({
                             loadingDecision={loadingDecision}
                             channelManagementDisabled={channelManagementDisabled}
                             routeId={route.id}
-                            onTokenDraftChange={onTokenDraftChange}
-                            onSaveToken={onSaveToken}
                             onDeleteChannel={onDeleteChannel}
                             onToggleChannelEnabled={onToggleChannelEnabled}
                             onSiteBlockModel={onSiteBlockModel}
@@ -1257,12 +1182,11 @@ function RouteCardInner({
 
 function buildChannelInteractionSignature(
   channels: RouteChannel[] | undefined,
-  channelTokenDraft: Record<number, number>,
   updatingChannel: Record<number, boolean>,
 ): string {
   if (!Array.isArray(channels) || channels.length === 0) return '';
   return channels
-    .map((channel) => `${channel.id}:${channelTokenDraft[channel.id] ?? ''}:${updatingChannel[channel.id] ? 1 : 0}`)
+    .map((channel) => `${channel.id}:${updatingChannel[channel.id] ? 1 : 0}`)
     .join('|');
 }
 
@@ -1289,12 +1213,9 @@ function areRouteCardPropsEqual(prev: RouteCardProps, next: RouteCardProps): boo
     || prev.onDelete !== next.onDelete
     || prev.onClearCooldown !== next.onClearCooldown
     || prev.onRoutingStrategyChange !== next.onRoutingStrategyChange
-    || prev.onTokenDraftChange !== next.onTokenDraftChange
-    || prev.onSaveToken !== next.onSaveToken
     || prev.onDeleteChannel !== next.onDeleteChannel
     || prev.onToggleChannelEnabled !== next.onToggleChannelEnabled
     || prev.onChannelDragEnd !== next.onChannelDragEnd
-    || prev.onCreateTokenForMissing !== next.onCreateTokenForMissing
     || prev.onAddChannel !== next.onAddChannel
     || prev.onSiteBlockModel !== next.onSiteBlockModel
     || prev.onToggleSourceGroup !== next.onToggleSourceGroup
@@ -1304,16 +1225,13 @@ function areRouteCardPropsEqual(prev: RouteCardProps, next: RouteCardProps): boo
     || prev.loadingChannels !== next.loadingChannels
     || prev.loadingDecision !== next.loadingDecision
     || prev.routeDecision !== next.routeDecision
-    || prev.candidateView !== next.candidateView
-    || prev.missingTokenSiteItems !== next.missingTokenSiteItems
-    || prev.missingTokenGroupItems !== next.missingTokenGroupItems
     || prev.channels !== next.channels
   ) {
     return false;
   }
 
-  return buildChannelInteractionSignature(prev.channels, prev.channelTokenDraft, prev.updatingChannel)
-    === buildChannelInteractionSignature(next.channels, next.channelTokenDraft, next.updatingChannel);
+  return buildChannelInteractionSignature(prev.channels, prev.updatingChannel)
+    === buildChannelInteractionSignature(next.channels, next.updatingChannel);
 }
 
 const RouteCard = memo(RouteCardInner, areRouteCardPropsEqual);

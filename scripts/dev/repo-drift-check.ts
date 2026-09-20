@@ -45,9 +45,7 @@ const ROUTES_PROXY_IMPORT_ALLOWLIST = new Set([
   'src/server/proxy-core/surfaces/sharedSurface.ts',
 ]);
 
-const TOP_LEVEL_PAGE_IMPORT_ALLOWLIST = new Set([
-  'src/web/pages/Accounts.tsx',
-]);
+const TOP_LEVEL_PAGE_IMPORT_ALLOWLIST = new Set<string>();
 
 function normalizeRelativePath(root: string, fullPath: string): string {
   return relative(root, fullPath).replaceAll('\\', '/');

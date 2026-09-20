@@ -694,7 +694,7 @@ export default function Settings() {
       .then((res: any) => setAllBrandNames(Array.isArray(res?.brands) ? res.brands : []))
       .catch(() => setAllBrandNames([]));
     // Load available models in background (non-blocking, best-effort)
-    api.getModelTokenCandidates()
+    api.getModelRouteCandidates()
       .then((res: any) => {
         const models = res?.models || {};
         const modelNames = Object.keys(models);
@@ -2308,7 +2308,7 @@ export default function Settings() {
             <div style={{ border: '1px solid var(--color-border-light)', borderRadius: 'var(--radius-sm)', padding: 10, fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.8 }}>
               <div>目标：{migrationSummary.dialect}（{migrationSummary.connection}）</div>
               <div>版本：{migrationSummary.version}，时间：{new Date(migrationSummary.timestamp).toLocaleString()}</div>
-              <div>迁移结果：站点 {migrationSummary.rows.sites} / 账号 {migrationSummary.rows.accounts} / 令牌 {migrationSummary.rows.accountTokens} / 路由 {migrationSummary.rows.tokenRoutes} / 通道 {migrationSummary.rows.routeChannels} / 设置 {migrationSummary.rows.settings}</div>
+              <div>迁移结果：站点 {migrationSummary.rows.sites} / 账号 {migrationSummary.rows.accounts} / 兼容凭证记录 {migrationSummary.rows.accountTokens} / 路由 {migrationSummary.rows.tokenRoutes} / 通道 {migrationSummary.rows.routeChannels} / 设置 {migrationSummary.rows.settings}</div>
             </div>
           )}
         </div>

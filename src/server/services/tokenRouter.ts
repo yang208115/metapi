@@ -14,7 +14,6 @@ import {
   type RouteRoutingStrategy,
 } from './routeRoutingStrategy.js';
 import { type DownstreamRoutingPolicy, EMPTY_DOWNSTREAM_ROUTING_POLICY } from './downstreamPolicyTypes.js';
-import { isUsableAccountToken } from './accountTokenService.js';
 import { getOauthInfoFromAccount } from './oauth/oauthAccount.js';
 import { parseCodexQuotaResetHint } from './oauth/quota.js';
 import {
@@ -42,7 +41,7 @@ interface RouteMatch {
     channel: typeof schema.routeChannels.$inferSelect;
     account: typeof schema.accounts.$inferSelect;
     site: typeof schema.sites.$inferSelect;
-    token: typeof schema.accountTokens.$inferSelect | null;
+    token: null;
     routeUnit: OAuthRouteUnitSummary | null;
     routeUnitMembers: Array<{
       member: typeof schema.oauthRouteUnitMembers.$inferSelect;
@@ -59,7 +58,7 @@ interface SelectedChannel {
   channel: typeof schema.routeChannels.$inferSelect;
   account: typeof schema.accounts.$inferSelect;
   site: typeof schema.sites.$inferSelect;
-  token: typeof schema.accountTokens.$inferSelect | null;
+  token: null;
   tokenValue: string;
   tokenName: string;
   actualModel: string;
@@ -1147,7 +1146,6 @@ async function loadRouteMatch(route: RouteRow, nowMs = Date.now()): Promise<Rout
       .from(schema.routeChannels)
       .innerJoin(schema.accounts, eq(schema.routeChannels.accountId, schema.accounts.id))
       .innerJoin(schema.sites, eq(schema.accounts.siteId, schema.sites.id))
-      .leftJoin(schema.accountTokens, eq(schema.routeChannels.tokenId, schema.accountTokens.id))
       .where(inArray(schema.routeChannels.routeId, enabledSourceRouteIds))
       .all()
     : [];
@@ -1171,7 +1169,7 @@ async function loadRouteMatch(route: RouteRow, nowMs = Date.now()): Promise<Rout
     },
     account: row.accounts,
     site: row.sites,
-    token: row.account_tokens,
+    token: null,
     routeUnit: row.route_channels.oauthRouteUnitId
       ? (routeUnitSummaries.get(row.route_channels.oauthRouteUnitId) || null)
       : null,
@@ -1823,10 +1821,6 @@ function updateStableFirstObservationProgress(
   });
 }
 
-function isExplicitTokenChannel(candidate: RouteChannelCandidate): boolean {
-  return typeof candidate.channel.tokenId === 'number' && candidate.channel.tokenId > 0;
-}
-
 export class TokenRouter {
   /**
    * Find matching route and select a channel for the given model.
@@ -2016,7 +2010,7 @@ export class TokenRouter {
         accountId: row.account.id,
         username: row.account.username || `account-${row.account.id}`,
         siteName: row.site.name || 'unknown',
-        tokenName: row.token?.name || 'default',
+        tokenName: 'account',
         sourceModel: resolveActualModelForSelectedChannel(
           requestedModel,
           match.route,
@@ -2040,7 +2034,7 @@ export class TokenRouter {
     }
 
     if (available.length === 0) {
-      summary.push('没有可用通道（全部被禁用、站点不可用、冷却或令牌不可用）');
+      summary.push('没有可用通道（全部被禁用、站点不可用、冷却或账号凭证不可用）');
       return {
         requestedModel,
         actualModel: mappedModel,
@@ -2096,7 +2090,7 @@ export class TokenRouter {
 
       const selectedChannel = candidateMap.get(selected.channel.id);
       const selectedLabel = selectedChannel
-        ? `${selectedChannel.username} @ ${selectedChannel.siteName} / ${selectedChannel.tokenName}`
+        ? `${selectedChannel.username} @ ${selectedChannel.siteName}`
         : `channel-${selected.channel.id}`;
       const actualModel = resolveActualModelForSelectedChannel(
         requestedModel,
@@ -2266,7 +2260,7 @@ export class TokenRouter {
 
       const selectedChannel = candidateMap.get(weighted.selected.channel.id);
       const selectedLabel = selectedChannel
-        ? `${selectedChannel.username} @ ${selectedChannel.siteName} / ${selectedChannel.tokenName}`
+        ? `${selectedChannel.username} @ ${selectedChannel.siteName}`
         : `channel-${weighted.selected.channel.id}`;
       const actualModel = resolveActualModelForSelectedChannel(
         requestedModel,
@@ -2376,7 +2370,7 @@ export class TokenRouter {
 
     const selectedChannel = candidateMap.get(selected.channel.id);
     const selectedLabel = selectedChannel
-      ? `${selectedChannel.username} @ ${selectedChannel.siteName} / ${selectedChannel.tokenName}`
+      ? `${selectedChannel.username} @ ${selectedChannel.siteName}`
       : `channel-${selected.channel.id}`;
     const actualModel = resolveActualModelForSelectedChannel(
       requestedModel,
@@ -3084,7 +3078,7 @@ export class TokenRouter {
     }
 
     const tokenValue = this.resolveRouteUnitMemberTokenValue(memberCandidate);
-    if (!tokenValue) reasonParts.push('令牌不可用');
+    if (!tokenValue) reasonParts.push('账号凭证不可用');
 
     if (isOauthRouteUnitMemberCoolingDown(memberCandidate.member, nowIso)) {
       reasonParts.push('冷却中');
@@ -3211,23 +3205,20 @@ export class TokenRouter {
     channel: typeof schema.routeChannels.$inferSelect;
     account: typeof schema.accounts.$inferSelect;
     site?: typeof schema.sites.$inferSelect | null;
-    token: typeof schema.accountTokens.$inferSelect | null;
+    token: null;
   }): string | null {
-    if (candidate.channel.tokenId) {
-      if (!candidate.token) return null;
-      if (!isUsableAccountToken(candidate.token)) return null;
-      const token = candidate.token.token?.trim();
-      return token ? token : null;
-    }
-
     if (getOauthInfoFromAccount(candidate.account)) {
       const accessToken = candidate.account.accessToken?.trim();
       if (accessToken) return accessToken;
-      return null;
+      const apiToken = candidate.account.apiToken?.trim();
+      return apiToken || null;
     }
 
     const fallback = candidate.account.apiToken?.trim();
     if (fallback) return fallback;
+
+    const accessToken = candidate.account.accessToken?.trim();
+    if (accessToken) return accessToken;
 
     return null;
   }
@@ -3253,27 +3244,14 @@ export class TokenRouter {
     }
 
     for (const ref of excludedCredentialRefs) {
-      if (ref.kind === 'account_token') {
-        if (
-          candidate.channel.tokenId === ref.tokenId
-          && candidate.token?.id === ref.tokenId
-          && candidate.account.id === ref.accountId
-          && candidate.site.id === ref.siteId
-        ) {
-          return 'API Key/令牌已被下游密钥排除';
-        }
-        continue;
-      }
-
       if (
-        candidate.channel.tokenId == null
-        && candidate.account.id === ref.accountId
+        candidate.account.id === ref.accountId
         && candidate.site.id === ref.siteId
       ) {
         const resolvedTokenValue = this.resolveChannelTokenValue(candidate);
         const accountApiToken = candidate.account.apiToken?.trim() || '';
         if (resolvedTokenValue && accountApiToken && resolvedTokenValue === accountApiToken) {
-          return 'API Key/令牌已被下游密钥排除';
+          return '账号 API Key 已被下游密钥排除';
         }
       }
     }
@@ -3308,11 +3286,7 @@ export class TokenRouter {
       return reasonParts;
     }
 
-    if (isExplicitTokenChannel(candidate)) {
-      if (candidate.account.status === 'disabled') {
-        reasonParts.push(`账号状态=${candidate.account.status}`);
-      }
-    } else if (candidate.account.status !== 'active') {
+    if (candidate.account.status !== 'active') {
       reasonParts.push(`账号状态=${candidate.account.status}`);
     }
 
@@ -3330,7 +3304,7 @@ export class TokenRouter {
     }
 
     const tokenValue = this.resolveChannelTokenValue(candidate);
-    if (!tokenValue) reasonParts.push('令牌不可用');
+    if (!tokenValue) reasonParts.push('账号凭证不可用');
 
     if (candidate.channel.cooldownUntil && candidate.channel.cooldownUntil > nowIso) {
       reasonParts.push('冷却中');
@@ -3465,7 +3439,7 @@ export class TokenRouter {
       ...dispatchCandidate,
       channel: selected.channel,
       tokenValue,
-      tokenName: dispatchCandidate.token?.name || 'default',
+      tokenName: 'account',
       actualModel,
     };
   }

@@ -1,9 +1,6 @@
 export type IndexedRouteModelCandidate = {
   modelName: string;
   accountId: number;
-  tokenId: number;
-  tokenName: string;
-  isDefault: boolean;
   username: string | null;
   siteId: number;
   siteName: string;
@@ -16,17 +13,9 @@ export type RouteAccountOption = {
   label: string;
 };
 
-export type RouteTokenOption = {
-  id: number;
-  name: string;
-  isDefault: boolean;
-  sourceModel?: string;
-};
-
 export type RouteCandidateView = {
   routeCandidates: IndexedRouteModelCandidate[];
   accountOptions: RouteAccountOption[];
-  tokenOptionsByAccountId: Record<number, RouteTokenOption[]>;
 };
 
 export type RouteModelPatternLike = {
@@ -38,7 +27,6 @@ export type RouteModelPatternLike = {
 const EMPTY_ROUTE_CANDIDATE_VIEW: RouteCandidateView = {
   routeCandidates: [],
   accountOptions: [],
-  tokenOptionsByAccountId: {},
 };
 
 export function buildRouteModelCandidatesIndex(
@@ -63,7 +51,7 @@ export function buildRouteModelCandidatesIndex(
     for (const [modelName, candidates] of Object.entries(modelCandidates || {})) {
       if (!matchesModelPattern(modelName, modelPattern)) continue;
       for (const candidate of candidates || []) {
-        const key = `${candidate.tokenId}::${modelName}`;
+        const key = `${candidate.accountId}::${modelName}`;
         if (!deduped.has(key)) {
           deduped.set(key, {
             ...candidate,
@@ -74,43 +62,21 @@ export function buildRouteModelCandidatesIndex(
     }
 
     const routeCandidates = Array.from(deduped.values()).sort((a, b) => {
-      if (a.accountId === b.accountId) return a.tokenId - b.tokenId;
+      if (a.accountId === b.accountId) return a.modelName.localeCompare(b.modelName);
       return a.accountId - b.accountId;
     });
 
     const accountMap = new Map<number, string>();
-    const tokenOptionsByAccountId: Record<number, RouteTokenOption[]> = {};
     for (const candidate of routeCandidates) {
       if (!accountMap.has(candidate.accountId)) {
         accountMap.set(candidate.accountId, `${candidate.username || `account-${candidate.accountId}`} @ ${candidate.siteName}`);
       }
-      if (!tokenOptionsByAccountId[candidate.accountId]) {
-        tokenOptionsByAccountId[candidate.accountId] = [];
-      }
-      tokenOptionsByAccountId[candidate.accountId].push({
-        id: candidate.tokenId,
-        name: candidate.tokenName,
-        isDefault: candidate.isDefault,
-        sourceModel: candidate.modelName,
-      });
-    }
-
-    for (const accountIdText of Object.keys(tokenOptionsByAccountId)) {
-      const accountId = Number.parseInt(accountIdText, 10);
-      tokenOptionsByAccountId[accountId].sort((a, b) => {
-        if (a.isDefault === b.isDefault) {
-          if (a.id === b.id) return (a.sourceModel || '').localeCompare(b.sourceModel || '', undefined, { sensitivity: 'base' });
-          return a.id - b.id;
-        }
-        return a.isDefault ? -1 : 1;
-      });
     }
 
     const accountOptions = Array.from(accountMap.entries()).map(([id, label]) => ({ id, label }));
     index[route.id] = {
       routeCandidates,
       accountOptions,
-      tokenOptionsByAccountId,
     };
   }
 

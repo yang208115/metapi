@@ -5,6 +5,16 @@ import { requireInsertedRowId } from '../db/insertHelpers.js';
 import { formatUtcSqlDateTime } from './localTimeService.js';
 
 type HeadersLike = Headers | Record<string, unknown> | null | undefined;
+const REDACTED_HEADER_VALUE = '[REDACTED]';
+
+function isSensitiveHeaderName(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  return normalized === 'authorization'
+    || normalized === 'proxy-authorization'
+    || normalized === 'cookie'
+    || normalized === 'set-cookie'
+    || /(?:^|[-_])(auth|api[-_]?key|token|secret|password)(?:[-_]|$)/i.test(normalized);
+}
 
 export type ProxyDebugCaptureOptions = {
   enabled: boolean;
@@ -74,7 +84,11 @@ function normalizeHeadersValue(value: HeadersLike): Record<string, unknown> | nu
   if (typeof headerEntries.get === 'function' && typeof headerEntries.entries === 'function') {
     return Object.fromEntries(
       [...headerEntries.entries.call(value) as Iterable<[string, string]>]
-        .sort((left, right) => left[0].localeCompare(right[0])),
+        .sort((left, right) => left[0].localeCompare(right[0]))
+        .map(([key, headerValue]) => [
+          key,
+          isSensitiveHeaderName(key) ? REDACTED_HEADER_VALUE : headerValue,
+        ]),
     );
   }
 
@@ -84,7 +98,11 @@ function normalizeHeadersValue(value: HeadersLike): Record<string, unknown> | nu
 
   const entries = Object.entries(value)
     .filter(([key]) => !!key)
-    .sort((left, right) => left[0].localeCompare(right[0]));
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([key, headerValue]) => [
+      key,
+      isSensitiveHeaderName(key) ? REDACTED_HEADER_VALUE : headerValue,
+    ]);
   return Object.fromEntries(entries);
 }
 

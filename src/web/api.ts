@@ -1,4 +1,5 @@
 import { clearAuthSession, getAuthToken } from "./authSession.js";
+import type { OperationsRequestsResponse, OperationsSnapshot, OperationsWindow } from '../server/shared/operationsContract.js';
 
 type BufferLike = {
   from(data: ArrayBuffer): { toString(encoding: "base64"): string };
@@ -723,44 +724,6 @@ export const api = {
       timeoutMs: data?.wait ? 150_000 : 30_000,
     }),
 
-  // Account tokens
-  getAccountTokens: (accountId?: number) =>
-    request(`/api/account-tokens${accountId ? `?accountId=${accountId}` : ""}`),
-  addAccountToken: (data: any) =>
-    request("/api/account-tokens", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  updateAccountToken: (id: number, data: any) =>
-    request(`/api/account-tokens/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  deleteAccountToken: (id: number) =>
-    request(`/api/account-tokens/${id}`, { method: "DELETE" }),
-  batchUpdateAccountTokens: (data: any) =>
-    request("/api/account-tokens/batch", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  getAccountTokenGroups: (accountId: number) =>
-    request(`/api/account-tokens/groups/${accountId}`),
-  setDefaultAccountToken: (id: number) =>
-    request(`/api/account-tokens/${id}/default`, { method: "POST" }),
-  getAccountTokenValue: (id: number) =>
-    request(`/api/account-tokens/${id}/value`),
-  syncAccountTokens: (accountId: number) =>
-    request(`/api/account-tokens/sync/${accountId}`, {
-      method: "POST",
-      timeoutMs: 45_000,
-    }),
-  syncAllAccountTokens: (wait = false) =>
-    request("/api/account-tokens/sync-all", {
-      method: "POST",
-      body: JSON.stringify(wait ? { wait: true } : {}),
-      timeoutMs: wait ? 150_000 : 30_000,
-    }),
-
   // Routes
   getRoutes: () => request("/api/routes"),
   getRoutesLite: () => request("/api/routes/lite"),
@@ -771,7 +734,6 @@ export const api = {
     routeId: number,
     channels: Array<{
       accountId: number;
-      tokenId?: number;
       sourceModel?: string;
     }>,
   ) =>
@@ -884,6 +846,27 @@ export const api = {
       },
     ),
   getDashboard: () => request("/api/stats/dashboard"),
+  getOperationsSnapshot: (params: {
+    windowMinutes: OperationsWindow;
+    liveWindowMinutes: number;
+    siteId?: number;
+    platform?: string;
+  }, signal?: AbortSignal) => request<OperationsSnapshot>(
+    `/api/stats/operations${buildQueryString(params)}`, { signal },
+  ),
+  getOperationsRequests: (params: {
+    from: string;
+    to: string;
+    siteId?: number;
+    platform?: string;
+    status?: string;
+    requestId?: string;
+    recovered?: boolean;
+    offset?: number;
+    limit?: number;
+  }, signal?: AbortSignal) => request<OperationsRequestsResponse>(
+    `/api/stats/operations/requests${buildQueryString(params)}`, { signal },
+  ),
   getDashboardSnapshot: (options?: { refresh?: boolean }) =>
     request(
       `/api/stats/dashboard${buildQueryString({
@@ -891,10 +874,13 @@ export const api = {
         ...(options?.refresh ? { refresh: 1 } : {}),
       })}`,
     ),
-  getDashboardInsights: (options?: { refresh?: boolean }) =>
+  getDashboardInsights: (options?: { refresh?: boolean; days?: number; siteId?: number; platform?: string }) =>
     request(
       `/api/stats/dashboard${buildQueryString({
         view: "insights",
+        days: options?.days,
+        siteId: options?.siteId,
+        platform: options?.platform,
         ...(options?.refresh ? { refresh: 1 } : {}),
       })}`,
     ),
@@ -960,133 +946,6 @@ export const api = {
         totalTokens: number;
       }>;
     }>,
-  getDashboardWindowMetrics: async (params?: {
-    siteIds?: number[];
-    windowMinutes?: number;
-  }) => {
-    const windowMinutes = Math.max(
-      1,
-      Math.min(60, Math.trunc(params?.windowMinutes || 1)),
-    );
-    const to = new Date();
-    const from = new Date(to.getTime() - windowMinutes * 60_000);
-    const hasSiteScope = Array.isArray(params?.siteIds);
-    const siteIds = hasSiteScope ? params.siteIds || [] : [undefined];
-    if (hasSiteScope && siteIds.length === 0) {
-      return {
-        windowMinutes,
-        totalCount: 0,
-        successCount: 0,
-        failedCount: 0,
-        businessLimitCount: 0,
-        totalCost: 0,
-        totalTokensAll: 0,
-        averageLatencyMs: null,
-        averageFirstByteLatencyMs: null,
-        peakQps: 0,
-        buckets: Array.from({ length: 20 }, () => ({
-          requestCount: 0,
-          successCount: 0,
-          failedCount: 0,
-          businessLimitCount: 0,
-          totalTokens: 0,
-        })),
-      };
-    }
-    const [summaries, windows] = await Promise.all([
-      Promise.all(
-        siteIds.map((siteId) =>
-          api.getProxyLogsMeta({
-            siteId,
-            from: from.toISOString(),
-            to: to.toISOString(),
-          }),
-        ),
-      ),
-      Promise.all(
-        siteIds.map((siteId) =>
-          api.getProxyLogsWindow({
-            siteId,
-            from: from.toISOString(),
-            to: to.toISOString(),
-            bucketCount: 20,
-          }),
-        ),
-      ),
-    ]);
-    const summary = summaries.reduce(
-      (total, current) => ({
-        totalCount: total.totalCount + current.summary.totalCount,
-        successCount: total.successCount + current.summary.successCount,
-        failedCount: total.failedCount + current.summary.failedCount,
-        totalCost: total.totalCost + current.summary.totalCost,
-        totalTokensAll: total.totalTokensAll + current.summary.totalTokensAll,
-        businessLimitCount:
-          total.businessLimitCount + (current.summary.businessLimitCount || 0),
-        latencyWeight:
-          total.latencyWeight +
-          (current.summary.averageLatencyMs || 0) * current.summary.totalCount,
-        firstByteLatencyWeight:
-          total.firstByteLatencyWeight +
-          (current.summary.averageFirstByteLatencyMs || 0) *
-            current.summary.totalCount,
-      }),
-      {
-        totalCount: 0,
-        successCount: 0,
-        failedCount: 0,
-        totalCost: 0,
-        totalTokensAll: 0,
-        businessLimitCount: 0,
-        latencyWeight: 0,
-        firstByteLatencyWeight: 0,
-      },
-    );
-    const buckets = Array.from({ length: 20 }, (_, index) =>
-      windows.reduce(
-        (bucket, current) => {
-          const source = current.buckets[index];
-          if (!source) return bucket;
-          return {
-            requestCount: bucket.requestCount + source.requestCount,
-            successCount: bucket.successCount + source.successCount,
-            failedCount: bucket.failedCount + source.failedCount,
-            businessLimitCount:
-              bucket.businessLimitCount + source.businessLimitCount,
-            totalTokens: bucket.totalTokens + source.totalTokens,
-          };
-        },
-        {
-          requestCount: 0,
-          successCount: 0,
-          failedCount: 0,
-          businessLimitCount: 0,
-          totalTokens: 0,
-        },
-      ),
-    );
-    const bucketSeconds = (windowMinutes * 60) / 20;
-    return {
-      windowMinutes,
-      totalCount: summary.totalCount,
-      successCount: summary.successCount,
-      failedCount: summary.failedCount,
-      totalCost: summary.totalCost,
-      totalTokensAll: summary.totalTokensAll,
-      businessLimitCount: summary.businessLimitCount,
-      averageLatencyMs: summary.totalCount
-        ? Math.round(summary.latencyWeight / summary.totalCount)
-        : null,
-      averageFirstByteLatencyMs: summary.totalCount
-        ? Math.round(summary.firstByteLatencyWeight / summary.totalCount)
-        : null,
-      peakQps: Math.max(
-        0,
-        ...buckets.map((bucket) => bucket.requestCount / bucketSeconds),
-      ),
-      buckets,
-    };
-  },
   getProxyLogDetail: (id: number) =>
     request(`/api/stats/proxy-logs/${id}`) as Promise<ProxyLogDetail>,
   getProxyDebugTraces: (params?: { limit?: number }) =>
@@ -1101,18 +960,20 @@ export const api = {
     request(`/api/models/check/${accountId}`, { method: "POST" }),
   getSiteDistribution: () => request("/api/stats/site-distribution"),
   getSiteTrend: (days = 7) => request(`/api/stats/site-trend?days=${days}`),
-  getSiteSnapshot: async (days = 7, options?: { refresh?: boolean }) => {
+  getSiteSnapshot: async (days = 7, options?: { refresh?: boolean; siteId?: number; platform?: string }) => {
     const query = buildQueryString({
       days,
+      siteId: options?.siteId,
+      platform: options?.platform,
       ...(options?.refresh ? { refresh: 1 } : {}),
     });
     const [distribution, trend, sites] = await Promise.all([
-      request<{ distribution: any[] }>(`/api/stats/site-distribution${query}`),
-      request<{ trend: any[] }>(`/api/stats/site-trend${query}`),
+      request<{ distribution: any[]; generatedAt: string }>(`/api/stats/site-distribution${query}`),
+      request<{ trend: any[]; generatedAt: string }>(`/api/stats/site-trend${query}`),
       request<any[]>("/api/sites"),
     ]);
     return {
-      generatedAt: new Date().toISOString(),
+      generatedAt: [distribution.generatedAt, trend.generatedAt].filter(Boolean).sort()[0] ?? null,
       distribution: Array.isArray(distribution?.distribution)
         ? distribution.distribution
         : [],
@@ -1250,7 +1111,7 @@ export const api = {
     request("/api/settings/notify/test", { method: "POST" }),
 
   getModels: () => request("/api/models"),
-  getModelTokenCandidates: () => request("/api/models/token-candidates"),
+  getModelRouteCandidates: () => request("/api/models/route-candidates"),
 
   // Simple chat test from admin panel
   startTestChatJob: (data: TestChatRequestPayload) =>

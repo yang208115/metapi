@@ -71,7 +71,7 @@ export default withMermaid(
         { text: '上游接入', link: '/upstream-integration' },
         { text: 'FAQ', link: '/faq' },
         { text: '文档维护', link: '/README' },
-        { text: '项目主页', link: 'https://github.com/cita-777/metapi' },
+        { text: '项目主页', link: 'https://github.com/yang208115/metapi' },
       ],
       sidebar: [
         {
@@ -87,10 +87,10 @@ export default withMermaid(
           items: [
             { text: '上游接入', link: '/upstream-integration' },
             { text: '配置说明', link: '/configuration' },
-            { text: 'K3s 更新中心（高级）', link: '/k3s-update-center' },
             { text: '客户端接入', link: '/client-integration' },
             { text: '管理 API', link: '/management-api' },
             { text: '运维手册', link: '/operations' },
+            { text: '监控指标与故障复盘', link: '/operations-monitoring' },
             { text: '常见问题 FAQ', link: '/faq' },
           ],
         },
@@ -104,7 +104,7 @@ export default withMermaid(
         },
       ],
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/cita-777/metapi' },
+        { icon: 'github', link: 'https://github.com/yang208115/metapi' },
       ],
       outline: {
         level: [2, 3],
