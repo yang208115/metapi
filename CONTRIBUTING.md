@@ -79,14 +79,6 @@ npm run build:web        # Build frontend only / 仅构建前端
 npm run build:server     # Build backend only / 仅构建后端
 ```
 
-### Documentation / 文档
-
-```bash
-npm run docs:dev         # Start VitePress dev server / 启动 VitePress 开发服务器
-npm run docs:build       # Build documentation / 构建文档
-npm run docs:preview     # Preview built docs / 预览构建的文档
-```
-
 ### Validation / 验证
 
 ```bash
@@ -114,7 +106,6 @@ metapi/
 │   │   ├── db/          # Database & ORM / 数据库与 ORM
 │   │   └── middleware/  # Middleware / 中间件
 │   ├── web/             # Frontend (React + Vite) / 前端（React + Vite）
-├── docs/                # VitePress documentation / VitePress 文档
 ├── drizzle/             # Database migrations / 数据库迁移
 └── scripts/             # Build & dev scripts / 构建与开发脚本
 ```
@@ -129,11 +120,10 @@ metapi/
 
 2. **Update documentation** / **更新文档**
    - Update README if adding user-facing features / 如果添加面向用户的功能，请更新 README
-   - Update docs/ for configuration or API changes / 配置或 API 更改请更新 docs/
+   - Update README for configuration or API changes / 配置或 API 更改请更新 README
    - Add JSDoc comments for new functions / 为新函数添加 JSDoc 注释
 
 3. **Run checks** / **运行检查**
-   - Documentation changes: `npm run docs:build` / 文档更改：`npm run docs:build`
    - Code changes: `npm run build` / 代码更改：`npm run build`
    - Database changes: `npm run smoke:db` / 数据库更改：`npm run smoke:db`
    - Architecture / repo drift changes: `npm run repo:drift-check` / 架构与仓库漂移检查：`npm run repo:drift-check`

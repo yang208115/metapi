@@ -23,6 +23,5 @@ docker/data/
 docker/.env
 
 # Local planning docs
-docs/plan/
-docs/plans/
+/plans/
 .ace-tool/

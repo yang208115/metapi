@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/logos/logo-full.png" alt="Metapi" width="280">
-
 # Metapi Refactor
 
 **A self-hosted AI API aggregation gateway focused on proxying, routing, and observability.**
@@ -16,9 +14,7 @@ Aggregate OpenAI-, Claude-, and Gemini-compatible upstreams behind one endpoint 
 
 <p>
   <a href="README.md">中文</a> · <strong>English</strong> ·
-  <a href="docs/getting-started.md">Getting Started</a> ·
-  <a href="docs/deployment.md">Deployment</a> ·
-  <a href="docs/configuration.md">Configuration</a>
+  <a href="LICENSE">License</a>
 </p>
 
 </div>
@@ -108,8 +104,6 @@ curl http://localhost:4000/v1/models \
   -H "Authorization: Bearer $PROXY_TOKEN"
 ```
 
-See [Client Integration](docs/client-integration.md) for Claude, Gemini, and common client examples.
-
 ## Project layout
 
 ```text
@@ -124,7 +118,6 @@ src/
 scripts/
 ├── dev/                  # schema, drift, and development tooling
 └── tests/                # architecture and telemetry tests
-docs/                     # VitePress documentation
 drizzle/                  # SQLite migration history
 ```
 
@@ -137,24 +130,11 @@ npm ci
 npm run typecheck
 npm test
 npm run build
-npm run docs:build
 npm run repo:drift-check
 git diff --check
 ```
 
 Schema changes must update the Drizzle schema, SQLite migration history, and checked-in cross-dialect schema artifacts together.
-
-## Documentation
-
-- [Getting Started](docs/getting-started.md)
-- [Upstream Integration](docs/upstream-integration.md)
-- [Deployment](docs/deployment.md)
-- [Configuration](docs/configuration.md)
-- [Client Integration](docs/client-integration.md)
-- [Operations](docs/operations.md)
-- [Monitoring semantics](docs/operations-monitoring.md)
-- [Management API](docs/management-api.md)
-- [FAQ](docs/faq.md)
 
 ## License and attribution
 

@@ -70,5 +70,5 @@ make small, consistent changes without re-learning the codebase each time.
   architecture boundaries.
 - If you add a new boundary-heavy module, add or extend an architecture test in
   the same area so the rule becomes executable.
-- Keep local planning files under `docs/plans/`. They are intentionally ignored
-  by git and should not be treated as published documentation.
+- Keep local planning files under `plans/`. They are intentionally ignored by
+  git and should not be treated as published project artifacts.

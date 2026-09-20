@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/logos/logo-full.png" alt="Metapi" width="280">
-
 # Metapi 重构版
 
 **聚焦代理、路由与可观测性的自托管 AI API 聚合网关**
@@ -17,10 +15,7 @@
 
 <p>
   <strong>中文</strong> · <a href="README_EN.md">English</a> ·
-  <a href="docs/getting-started.md">快速上手</a> ·
-  <a href="docs/deployment.md">部署指南</a> ·
-  <a href="docs/configuration.md">配置说明</a> ·
-  <a href="docs/operations-monitoring.md">监控口径</a>
+  <a href="LICENSE">许可证</a>
 </p>
 
 </div>
@@ -82,16 +77,6 @@
 - 系统日志通过受保护的管理接口实时展示服务端输出。
 - SQLite / MySQL / PostgreSQL 共用同一套 Schema 合约和聚合口径。
 
-## 界面预览
-
-| 工作台 | 路由管理 |
-| --- | --- |
-| ![工作台](docs/screenshots/dashboard.png) | ![路由管理](docs/screenshots/routes.png) |
-
-| 账号连接 | 请求日志 |
-| --- | --- |
-| ![账号连接](docs/screenshots/accounts.png) | ![请求日志](docs/screenshots/proxy-logs.png) |
-
 ## 快速开始
 
 ### 从源码运行
@@ -141,7 +126,7 @@ docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 | `DATA_DIR` | SQLite、缓存和本地数据目录，默认 `./data` |
 | `TZ` | 时区，默认 `Asia/Shanghai` |
 
-MySQL、PostgreSQL、OAuth、通知与代理参数见[配置说明](docs/configuration.md)。
+MySQL、PostgreSQL、OAuth、通知与代理参数以 `.env.example`、`src/server/config.ts` 和运行时错误提示为准。
 
 ## 客户端接入
 
@@ -159,8 +144,6 @@ curl http://localhost:4000/v1/models \
   -H "Authorization: Bearer $PROXY_TOKEN"
 ```
 
-Claude、Gemini 与常见客户端的详细配置见[客户端接入](docs/client-integration.md)。
-
 ## 项目结构
 
 ```text
@@ -175,11 +158,10 @@ src/
 scripts/
 ├── dev/                  # Schema、漂移检查与开发工具
 └── tests/                # 关键架构和遥测测试
-docs/                     # VitePress 文档
 drizzle/                  # SQLite 迁移历史
 ```
 
-更多约定见[目录规范](docs/project-structure.md)和仓库根目录的 [AGENTS.md](AGENTS.md)。
+更多约定见仓库根目录的 [AGENTS.md](AGENTS.md)。
 
 ## 开发与校验
 
@@ -190,30 +172,11 @@ npm ci
 npm run typecheck
 npm test
 npm run build
-npm run docs:build
 npm run repo:drift-check
 git diff --check
 ```
 
 数据库结构变更必须同时更新 Drizzle Schema、SQLite 迁移和已检入的跨数据库 Schema 产物。
-
-## 文档
-
-- [快速上手](docs/getting-started.md)
-- [上游接入](docs/upstream-integration.md)
-- [部署指南](docs/deployment.md)
-- [配置说明](docs/configuration.md)
-- [客户端接入](docs/client-integration.md)
-- [运维手册](docs/operations.md)
-- [监控与指标口径](docs/operations-monitoring.md)
-- [管理 API](docs/management-api.md)
-- [常见问题](docs/faq.md)
-
-本地预览文档：
-
-```bash
-npm run docs:dev
-```
 
 ## 上游同步与兼容
 
