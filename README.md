@@ -81,7 +81,7 @@
 
 ### 从源码运行
 
-要求：Node.js 22 或更高版本。
+要求：Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+。Docker 镜像使用 Node.js 22.23.4。
 
 ```bash
 git clone https://github.com/yang208115/metapi.git

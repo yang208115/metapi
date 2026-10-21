@@ -57,7 +57,7 @@ Use the [upstream project](https://github.com/cita-777/metapi) if you need its c
 
 ## Quick start
 
-Node.js 22 or newer is required.
+Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ is required. Docker images use Node.js 22.23.4.
 
 ```bash
 git clone https://github.com/yang208115/metapi.git

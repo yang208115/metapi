@@ -1,6 +1,7 @@
 # Node 22 is the minimum supported runtime and retains the linux/arm/v7
 # manifest required by the multi-architecture Docker jobs.
-FROM node:22-bookworm-slim AS builder
+ARG NODE_VERSION=22.23.4
+FROM node:${NODE_VERSION}-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -23,7 +24,7 @@ COPY . .
 RUN npm run build:web && npm run build:server
 RUN npm prune --omit=dev --no-audit --no-fund
 
-FROM node:22-bookworm-slim
+FROM node:${NODE_VERSION}-bookworm-slim
 
 WORKDIR /app
 
